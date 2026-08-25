@@ -3,6 +3,7 @@
  * Not MeloNX, not Ryujinx, not Yuzu. No Nintendo code. */
 
 #include "nce.h"
+#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -43,6 +44,17 @@ static void nlog(HelionNCE *n, const char *fmt, ...) {
     size_t used = strlen(n->log);
     if (used + strlen(b) + 2 < sizeof n->log)
         snprintf(n->log + used, sizeof n->log - used, "%s\n", b);
+}
+
+static void jit_wp(int enabled) {
+    typedef void (*fn)(int);
+    static fn f;
+    static int once;
+    if (!once) {
+        f = (fn)dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
+        once = 1;
+    }
+    if (f) f(enabled);
 }
 
 int helion_nce_jit_ok(void) {
@@ -184,7 +196,7 @@ static void *guest_thread(void *a) {
     r->n->running = 1;
     nlog(r->n, "NCE enter %p", (void *)r->entry);
 #if defined(__APPLE__)
-    pthread_jit_write_protect_np(1);
+    jit_wp(1);
 #endif
     r->entry(r->fb, r->count);
     nlog(r->n, "NCE returned");
@@ -197,7 +209,7 @@ static int start_guest(HelionNCE *n, void *entry) {
     install_trap();
 #if defined(__APPLE__)
     sys_icache_invalidate(n->jit, n->jit_sz);
-    pthread_jit_write_protect_np(1);
+    jit_wp(1);
 #endif
     if (mprotect(n->jit, n->jit_sz, PROT_READ | PROT_EXEC) != 0)
         nlog(n, "mprotect exec errno=%d (JIT?)", errno);
@@ -226,7 +238,7 @@ int helion_nce_run_probe(HelionNCE *n, char *err, size_t errlen) {
         return -1;
     }
 #if defined(__APPLE__)
-    pthread_jit_write_protect_np(0);
+    jit_wp(0);
 #endif
     uint32_t ins[32];
     int k = emit_probe(ins);
@@ -286,7 +298,7 @@ int helion_nce_run_nro(HelionNCE *n, const char *path, char *err, size_t errlen)
         return -1;
     }
 #if defined(__APPLE__)
-    pthread_jit_write_protect_np(0);
+    jit_wp(0);
 #endif
     memset(n->jit, 0, n->jit_sz);
     memcpy(n->jit, file, (size_t)sz);

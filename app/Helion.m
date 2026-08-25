@@ -275,7 +275,6 @@ static UIColor *HMuted(void) { return [UIColor colorWithWhite:0.55 alpha:1]; }
     [b setTitleColor:HNavy() forState:UIControlStateNormal];
     b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
     b.layer.cornerRadius = 14;
-    b.contentEdgeInsets = UIEdgeInsetsMake(0, 16, 0, 16);
     return b;
 }
 - (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; [self reload]; }
