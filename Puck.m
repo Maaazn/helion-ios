@@ -292,11 +292,11 @@ static void PuckOpenAssistiveTouchSettings(void) {
     ]];
 
     __weak PuckHome *w = self;
-    _connectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidConnectNotification object:nil queue:.mainQueue usingBlock:^(NSNotification *n) {
+    _connectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [w bindMouse:n.object];
         [w refreshDevice];
     }];
-    _disconnectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidDisconnectNotification object:nil queue:.mainQueue usingBlock:^(NSNotification *n) {
+    _disconnectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [w refreshDevice];
     }];
 }
@@ -316,7 +316,7 @@ static void PuckOpenAssistiveTouchSettings(void) {
     GCMouseInput *in = mouse.mouseInput;
     __weak PuckHome *w = self;
     in.mouseMovedHandler = ^(GCMouseInput *input, float dx, float dy) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [w move:CGPointMake(dx, -dy)]; });
+        dispatch_async(dispatch_get_main_queue(), ^{ [w nudge:CGPointMake(dx, -dy)]; });
     };
     in.leftButton.pressedChangedHandler = ^(GCControllerButtonInput *b, float v, BOOL p) {
         dispatch_async(dispatch_get_main_queue(), ^{ [w click:p]; });
@@ -327,10 +327,8 @@ static void PuckOpenAssistiveTouchSettings(void) {
         };
     }
     if (in.scroll) {
-        in.scroll.mouseMovedHandler = ^(GCDeviceCursor *c, float dx, float dy) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                w.status.text = [NSString stringWithFormat:@"scroll  %.0f", dy];
-            });
+        in.scroll.valueChangedHandler = ^(GCControllerDirectionPad *d, float dx, float dy) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [w note:[NSString stringWithFormat:@"scroll  %.0f", dy]]; });
         };
     }
 }
@@ -354,7 +352,7 @@ static void PuckOpenAssistiveTouchSettings(void) {
         _status.text = @"Hover";
     }
 }
-- (void)move:(CGPoint)d {
+- (void)nudge:(CGPoint)d {
     CGFloat s = _accel;
     _pos.x += d.x * s;
     _pos.y += d.y * s;
@@ -397,7 +395,10 @@ static void PuckOpenAssistiveTouchSettings(void) {
     _status.text = @"right click";
     [_haptic notificationOccurred:UINotificationFeedbackTypeWarning];
 }
+- (void)note:(NSString *)s { _status.text = s; }
 - (void)targetTap:(UIButton *)b {
+    _status.text = [NSString stringWithFormat:@"hit  %@", b.currentTitle];
+}
     _status.text = [NSString stringWithFormat:@"hit  %@", b.currentTitle];
 }
 - (void)toggleVisible {
