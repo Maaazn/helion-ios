@@ -1,4 +1,4 @@
-// Helion 1.2 — Windows & macOS on iPhone. QEMU in-process (GPL-2.0). Not UTM.
+// Helion 1.3 — independent multi-system path. Phase 1: real QEMU logs.
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <GameController/GameController.h>
@@ -34,6 +34,7 @@ static UIColor *HMuted(void) { return [UIColor colorWithWhite:0.55 alpha:1]; }
 + (BOOL)installISO:(NSURL *)url kind:(NSString *)kind error:(NSError **)error;
 + (NSString *)diskPath:(NSString *)kind;
 + (void)ensureDisk:(NSString *)kind;
++ (NSString *)logPath;
 @end
 @implementation HelionStore
 + (NSString *)root {
@@ -68,6 +69,9 @@ static UIColor *HMuted(void) { return [UIColor colorWithWhite:0.55 alpha:1]; }
     int fd = open(p.fileSystemRepresentation, O_RDWR | O_CREAT, 0644);
     if (fd >= 0) { ftruncate(fd, 8ull << 30); close(fd); }
 }
++ (NSString *)logPath {
+    return [[self root] stringByAppendingPathComponent:@"qemu.log"];
+}
 @end
 
 #pragma mark - Engine
@@ -83,6 +87,8 @@ static UIColor *HMuted(void) { return [UIColor colorWithWhite:0.55 alpha:1]; }
 @end
 @implementation HelionEngine {
     void *_dl;
+    int _savedOut;
+    int _savedErr;
 }
 static HelionEngine *GEng;
 + (instancetype)shared {
@@ -108,12 +114,26 @@ static HelionEngine *GEng;
     return [NSString stringWithFormat:@"qemu_init %@\nx86 %llu  arm %llu",
             qemu_init ? @"linked" : @"missing", xs, asz];
 }
+- (void)redirectLogs {
+    NSString *path = [HelionStore logPath];
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    int fd = open(path.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    _savedOut = dup(STDOUT_FILENO);
+    _savedErr = dup(STDERR_FILENO);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    close(fd);
+    const char *banner = "=== Helion QEMU log ===\n";
+    write(STDOUT_FILENO, banner, strlen(banner));
+}
 - (NSArray *)argvFor:(NSString *)kind {
     BOOL mac = [kind isEqualToString:@"mac"];
     NSString *work = [[HelionStore root] stringByAppendingPathComponent:@"run"];
     [[NSFileManager defaultManager] createDirectoryAtPath:work withIntermediateDirectories:YES attributes:nil error:nil];
     [HelionStore ensureDisk:kind];
 
+    // Phase 1: keep VNC as interim, add explicit log + serial for visibility
     NSMutableArray *a = [NSMutableArray arrayWithObjects:
         @"qemu-system-x86_64",
         @"-machine", @"q35",
@@ -121,13 +141,23 @@ static HelionEngine *GEng;
         @"-accel", @"tcg,thread=multi",
         @"-m", @"1536",
         @"-smp", @"2",
-        @"-display", @"vnc=127.0.0.1:0",
+        @"-display", @"vnc=127.0.0.1:0,to=99",
         @"-vga", @"std",
         @"-usb", @"-device", @"usb-tablet",
         @"-device", @"virtio-keyboard-pci",
         @"-boot", @"order=dc",
         @"-rtc", @"base=localtime",
+        @"-serial", @"file:",
         nil];
+    // serial file path appended below
+    NSString *serialPath = [[HelionStore root] stringByAppendingPathComponent:@"serial.log"];
+    a[a.count - 1] = [NSString stringWithFormat:@"file:%@", serialPath];
+
+    // QEMU internal log
+    [a addObject:@"-D"];
+    [a addObject:[HelionStore logPath]];
+    [a addObject:@"-d"];
+    [a addObject:@"guest_errors,unimp"];
 
     if (mac) {
         NSString *fw = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"OSX-KVM"];
@@ -169,12 +199,18 @@ static HelionEngine *GEng;
     for (int i = 0; i < argc; i++) argv[i] = strdup([args[i] UTF8String]);
 
     self.running = YES;
+    [self redirectLogs];
 
     if (qemu_init && qemu_main_loop) {
         if (log) log(@"Starting QEMU (in-process)…");
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            qemu_init(argc, argv, environ);
-            qemu_main_loop();
+            int rc = qemu_init(argc, argv, environ);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "qemu_init returned %d\n", rc);
+            write(STDOUT_FILENO, buf, strlen(buf));
+            if (rc == 0) {
+                qemu_main_loop();
+            }
             if (qemu_cleanup) qemu_cleanup(0);
             self.running = NO;
             if (log) dispatch_async(dispatch_get_main_queue(), ^{ log(@"QEMU exited"); });
@@ -198,8 +234,11 @@ static HelionEngine *GEng;
     if (log) log(@"Starting QEMU (dylib)…");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         if (qinit) {
-            qinit(argc, argv, environ);
-            if (qloop) qloop();
+            int rc = qinit(argc, argv, environ);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "qemu_init returned %d\n", rc);
+            write(STDOUT_FILENO, buf, strlen(buf));
+            if (rc == 0 && qloop) qloop();
         } else {
             qmain(argc, argv);
         }
@@ -213,7 +252,7 @@ static HelionEngine *GEng;
 }
 @end
 
-#pragma mark - VNC Screen
+#pragma mark - VNC Screen (interim — will be replaced by SPICE+Metal)
 
 @interface HelionScreen : UIView
 @property (nonatomic, copy) void (^onStatus)(NSString *msg);
@@ -254,9 +293,9 @@ static HelionEngine *GEng;
 - (void)connectLoop {
     _run = YES;
     _connected = NO;
-    if (self.onStatus) self.onStatus(@"Waiting for display (VNC)…");
+    if (self.onStatus) self.onStatus(@"Waiting for display…");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        for (int i = 0; i < 80 && self->_run; i++) {
+        for (int i = 0; i < 60 && self->_run; i++) {
             if ([self tryConnect]) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (self.onStatus) self.onStatus(@"Connected — touch to click");
@@ -264,15 +303,10 @@ static HelionEngine *GEng;
                 return;
             }
             usleep(500000);
-            if (i == 10 && self.onStatus) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.onStatus(@"Still waiting for VNC… (enable JIT if not done)");
-                });
-            }
         }
         if (self->_run && self.onStatus) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.onStatus(@"VNC failed — QEMU may have crashed or needs JIT");
+                self.onStatus(@"No display yet — check log below");
             });
         }
     });
@@ -446,7 +480,9 @@ static HelionEngine *GEng;
     HelionScreen *_screen;
     UILabel *_status;
     UIActivityIndicatorView *_spinner;
+    UITextView *_logView;
     UIButton *_stopBtn;
+    NSTimer *_logTimer;
 }
 - (instancetype)initWithKind:(NSString *)kind {
     self = [super init];
@@ -489,6 +525,16 @@ static HelionEngine *GEng;
     };
     [self.view addSubview:_screen];
 
+    _logView = [UITextView new];
+    _logView.editable = NO;
+    _logView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
+    _logView.textColor = [UIColor colorWithWhite:0.75 alpha:1];
+    _logView.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+    _logView.layer.cornerRadius = 8;
+    _logView.text = @"QEMU log will appear here…\n";
+    _logView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_logView];
+
     _stopBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     [_stopBtn setTitle:@"Stop" forState:UIControlStateNormal];
     _stopBtn.tintColor = HCopper();
@@ -498,21 +544,26 @@ static HelionEngine *GEng;
     [self.view addSubview:_stopBtn];
 
     [NSLayoutConstraint activateConstraints:@[
-        [_status.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:12],
-        [_status.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [_status.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [_status.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+        [_status.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [_status.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
 
         [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_spinner.topAnchor constraintEqualToAnchor:_status.bottomAnchor constant:8],
+        [_spinner.topAnchor constraintEqualToAnchor:_status.bottomAnchor constant:4],
 
-        [_screen.topAnchor constraintEqualToAnchor:_spinner.bottomAnchor constant:12],
+        [_screen.topAnchor constraintEqualToAnchor:_spinner.bottomAnchor constant:8],
         [_screen.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
         [_screen.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
-        [_screen.bottomAnchor constraintEqualToAnchor:_stopBtn.topAnchor constant:-16],
+        [_screen.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.42],
+
+        [_logView.topAnchor constraintEqualToAnchor:_screen.bottomAnchor constant:8],
+        [_logView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_logView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_logView.bottomAnchor constraintEqualToAnchor:_stopBtn.topAnchor constant:-12],
 
         [_stopBtn.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_stopBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-16],
-        [_stopBtn.heightAnchor constraintEqualToConstant:44]
+        [_stopBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12],
+        [_stopBtn.heightAnchor constraintEqualToConstant:40]
     ]];
 
     NSString *err = [[HelionEngine shared] startKind:_kind onLog:^(NSString *l) {
@@ -523,17 +574,39 @@ static HelionEngine *GEng;
     if (err) {
         _status.text = err;
         [_spinner stopAnimating];
+        _logView.text = err;
     } else {
         [_screen connectLoop];
+        _logTimer = [NSTimer scheduledTimerWithTimeInterval:0.8 target:self selector:@selector(pollLog) userInfo:nil repeats:YES];
+    }
+}
+- (void)pollLog {
+    NSString *path = [HelionStore logPath];
+    NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    if (txt.length == 0) {
+        // also try serial
+        NSString *serial = [[HelionStore root] stringByAppendingPathComponent:@"serial.log"];
+        txt = [NSString stringWithContentsOfFile:serial encoding:NSUTF8StringEncoding error:nil];
+    }
+    if (txt.length) {
+        _logView.text = txt;
+        if (txt.length > 20) {
+            NSRange bottom = NSMakeRange(txt.length - 1, 1);
+            [_logView scrollRangeToVisible:bottom];
+        }
     }
 }
 - (void)stopTapped {
+    [_logTimer invalidate];
+    _logTimer = nil;
     [_screen disconnect];
     [[HelionEngine shared] stop];
     [self.navigationController popViewControllerAnimated:YES];
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    [_logTimer invalidate];
+    _logTimer = nil;
     [_screen disconnect];
 }
 @end
@@ -559,7 +632,7 @@ static HelionEngine *GEng;
     [self.view addSubview:mark];
 
     UILabel *sub = [UILabel new];
-    sub.text = @"Windows & macOS on iPhone\nYou bring the ISO";
+    sub.text = @"Independent system emulator\nPhase 1 → SPICE + Metal";
     sub.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
     sub.textColor = [HCopper() colorWithAlphaComponent:0.9];
     sub.numberOfLines = 2;
