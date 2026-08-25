@@ -58,6 +58,12 @@ cat > "$APP/Info.plist" <<PLIST
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
   <key>UISupportsDocumentBrowser</key><false/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+  <key>LSApplicationQueriesSchemes</key>
+  <array>
+    <string>prefs</string>
+    <string>App-prefs</string>
+    <string>app-prefs</string>
+  </array>
   <key>NSPhotoLibraryUsageDescription</key><string>Pick a cursor image or wallpaper.</string>
   <key>UTImportedTypeDeclarations</key>
   <array>

@@ -1,10 +1,11 @@
-// Puck 1.3 — iPhone system pointer = AssistiveTouch (Apple). Hide the menu button.
+// Puck 1.4 — Pointer Control is on iPhone. Mouse HID unlocks the pane.
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <notify.h>
 
 typedef NS_ENUM(NSInteger, PuckShape) { PuckShapeMac = 0, PuckShapeWin, PuckShapePuck, PuckShapeCross, PuckShapeFile };
 typedef NS_ENUM(NSInteger, PuckDesk)  { PuckDeskVoid = 0, PuckDeskGrid, PuckDeskPaper, PuckDeskPhoto };
@@ -16,12 +17,12 @@ static UIColor *Card(void)  { return [UIColor colorWithRed:0.10 green:0.11 blue:
 static UIColor *Dim(void)   { return [UIColor colorWithWhite:0.55 alpha:1]; }
 
 static void PuckOpenPrefs(NSArray<NSString *> *urls) {
+    UIApplication *app = UIApplication.sharedApplication;
     for (NSString *s in urls) {
         NSURL *u = [NSURL URLWithString:s];
-        if (u && [UIApplication.sharedApplication canOpenURL:u]) {
-            [UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];
-            return;
-        }
+        if (!u) continue;
+        [app openURL:u options:@{} completionHandler:nil];
+        return;
     }
 }
 
@@ -83,16 +84,37 @@ static NSString *PuckEnableIPhonePointer(void) {
     at |= PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
     at |= PuckAXCallC("_AXSAssistiveTouchSetEnabled", YES);
     at |= PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
-    if (at) [hit addObject:@"AssistiveTouch on"];
+    at |= PuckAXSet(ax, @"setAssistiveTouchOn:", YES);
+    if (at) [hit addObject:@"AssistiveTouch"];
     BOOL menu = NO;
     menu |= PuckAXCallC("AXSAssistiveTouchAlwaysShowMenuSetEnabled", NO);
     menu |= PuckAXCallC("AXSAlwaysShowMenuSetEnabled", NO);
     menu |= PuckAXSet(ax, @"setAlwaysShowMenuEnabled:", NO);
     menu |= PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
     menu |= PuckAXSet(ax, @"setAlwaysShowMenu:", NO);
-    if (menu) [hit addObject:@"button hidden"];
-    if (!hit.count) return nil;
+    if (menu) [hit addObject:@"menu hidden"];
+    BOOL ptr = NO;
+    ptr |= PuckAXCallC("AXSPointerControlSetEnabled", YES);
+    ptr |= PuckAXSet(ax, @"setPointerControlEnabled:", YES);
+    ptr |= PuckAXSet(ax, @"setMousePointerEnabled:", YES);
+    ptr |= PuckAXSet(ax, @"setPointerIncreaseContrastEnabled:", YES);
+    if (ptr) [hit addObject:@"Pointer Control API"];
+    notify_post("com.apple.accessibility.cache.assistivetouch");
+    notify_post("com.apple.accessibility.AssistiveTouch.enabled");
+    BOOL hid = (GCMouse.current != nil) || (GCMouse.mice.count > 0);
+    [hit addObject:hid ? @"HID unlocked" : @"plug mouse to unlock pane"];
     return [hit componentsJoinedByString:@" · "];
+}
+
+static NSArray<NSString *> *PuckPointerControlURLs(void) {
+    return @[
+        @"App-prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
+        @"prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
+        @"App-prefs:root=ACCESSIBILITY",
+        @"prefs:root=ACCESSIBILITY"
+    ];
 }
 
 static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
@@ -392,12 +414,15 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *sys = [self mintBtn:@"Show iPhone pointer" action:@selector(systemPointer)];
+    UIButton *sys = [self mintBtn:@"Unlock pointer" action:@selector(systemPointer)];
     sys.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:sys];
+    UIButton *pc = [self mintBtn:@"Pointer Control" action:@selector(openPointerControl) ghost:YES];
+    pc.translatesAutoresizingMaskIntoConstraints = NO;
+    [bar addSubview:pc];
 
     _sysNote = [UILabel new];
-    _sysNote.text = @"iPhone pointer is AssistiveTouch. We hide the button.";
+    _sysNote.text = @"Pointer Control is on iPhone. Plug the mouse — the pane unlocks.";
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     _sysNote.numberOfLines = 2;
@@ -453,8 +478,12 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_speed.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [sys.topAnchor constraintEqualToAnchor:spL.bottomAnchor constant:8],
         [sys.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
-        [sys.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
+        [sys.trailingAnchor constraintEqualToAnchor:bar.centerXAnchor constant:-4],
         [sys.heightAnchor constraintEqualToConstant:40],
+        [pc.topAnchor constraintEqualToAnchor:sys.topAnchor],
+        [pc.leadingAnchor constraintEqualToAnchor:bar.centerXAnchor constant:4],
+        [pc.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
+        [pc.heightAnchor constraintEqualToConstant:40],
         [_sysNote.topAnchor constraintEqualToAnchor:sys.bottomAnchor constant:4],
         [_sysNote.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [_sysNote.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
@@ -465,6 +494,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _connectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself bindMouse:n.object];
         [wself refreshDevice];
+        [wself systemPointer];
     }];
     _disconnectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself refreshDevice];
@@ -532,6 +562,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
     [self refreshDevice];
+    if (GCMouse.mice.count) [self systemPointer];
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self placeCursor]; }
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
@@ -695,18 +726,12 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 }
 - (void)systemPointer {
     NSString *ok = PuckEnableIPhonePointer();
-    if (ok) {
-        _sysNote.text = ok;
-        _status.text = ok;
-        return;
-    }
-    _sysNote.text = @"Open AssistiveTouch, then turn off Always Show Menu.";
-    PuckOpenPrefs(@[
-        @"App-prefs:root=ACCESSIBILITY&path=TOUCH/ASSISTIVE_TOUCH",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH/ASSISTIVE_TOUCH",
-        @"App-prefs:root=ACCESSIBILITY&path=TOUCH",
-        @"App-prefs:root=ACCESSIBILITY"
-    ]);
+    _sysNote.text = ok;
+    _status.text = ok;
+}
+- (void)openPointerControl {
+    [self systemPointer];
+    PuckOpenPrefs(PuckPointerControlURLs());
 }
 @end
 
