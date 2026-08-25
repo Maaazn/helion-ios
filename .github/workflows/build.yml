@@ -16,34 +16,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache QEMU iphoneos
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: .qemu-ios
+          key: qemu-ios-${{ hashFiles('scripts/build-qemu-ios.sh') }}
+
       - name: Build QEMU for iphoneos
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
         timeout-minutes: 90
         run: |
           set -uo pipefail
           chmod +x scripts/build-qemu-ios.sh scripts/prove.sh scripts/build-ipa.sh
-          scripts/build-qemu-ios.sh "$RUNNER_TEMP/qemu-ios"
+          scripts/build-qemu-ios.sh "$GITHUB_WORKSPACE/.qemu-ios"
 
       - name: Prove QEMU binaries
         run: |
           set -euo pipefail
           chmod +x scripts/prove.sh
-          scripts/prove.sh "$RUNNER_TEMP/qemu-ios" "" "$RUNNER_TEMP/PROOF-qemu.txt"
+          scripts/prove.sh "$GITHUB_WORKSPACE/.qemu-ios" "" "$RUNNER_TEMP/PROOF-qemu.txt"
           cat "$RUNNER_TEMP/PROOF-qemu.txt"
 
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.0.1"
-          QEMU_DIR: ${{ runner.temp }}/qemu-ios
+          HELION_VERSION: "1.0.2"
+          QEMU_DIR: ${{ github.workspace }}/.qemu-ios
         run: |
           set -euo pipefail
+          chmod +x scripts/build-ipa.sh
           scripts/build-ipa.sh
-          # build-ipa.sh zips internally; that zip is not a release.
 
       - name: Prove app contains engine
         run: |
           set -euo pipefail
           APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
-          scripts/prove.sh "$RUNNER_TEMP/qemu-ios" "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
+          scripts/prove.sh "$GITHUB_WORKSPACE/.qemu-ios" "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
           cat "$GITHUB_WORKSPACE/PROOF.txt"
           grep -q "PROOF_OK all" "$GITHUB_WORKSPACE/PROOF.txt"
 
@@ -95,11 +103,11 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: Helion 1.0.1
+          tag_name: v1.0.2
+          name: Helion 1.0.2
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            1.0.1 — code fixes.
+            1.0.2 — code fixes.
 

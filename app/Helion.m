@@ -29,6 +29,11 @@ extern char **environ;
 + (NSString *)isoPath {
     return [[self root] stringByAppendingPathComponent:@"guest.iso"];
 }
++ (BOOL)isoPresent {
+    NSNumber *n = [[NSFileManager defaultManager]
+        attributesOfItemAtPath:[self isoPath] error:nil][NSFileSize];
+    return n.unsignedLongLongValue > (8ull << 20);
+}
 + (NSString *)isoHint {
     FILE *f = fopen([self isoPath].fileSystemRepresentation, "rb");
     if (!f) return @"none";
@@ -248,7 +253,8 @@ extern char **environ;
         [_log.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [_log.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
-    [self banner];
+    @try { [self banner]; }
+    @catch (NSException *ex) { _log.text = [NSString stringWithFormat:@"Helion\n%@", ex]; }
 }
 - (void)banner {
     NSMutableString *s = [NSMutableString string];
