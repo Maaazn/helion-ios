@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-0.1.0}"
+VER="${HELION_VERSION:-1.0.0}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
@@ -24,7 +24,7 @@ cat > "$APP/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Helion</string>
   <key>CFBundleDisplayName</key><string>Helion</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>16.0</string>
