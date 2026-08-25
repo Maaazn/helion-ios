@@ -478,7 +478,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd ../..\nmv src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/publish/Ryujinx.Headless.SDL2.dylib src/MeloNX/MeloNX/Dependencies/Dynamic\\ Libraries/Ryujinx.Headless.SDL2.dylib\n";
+			shellScript = "set +e\ncd \"${SRCROOT}/../..\"\nDEST=\"src/MeloNX/MeloNX/Dependencies/Dynamic Libraries/Ryujinx.Headless.SDL2.dylib\"\nfor c in src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/native/Ryujinx.Headless.SDL2.dylib src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/publish/Ryujinx.Headless.SDL2.dylib; do\n  if [ -f \"$c\" ]; then cp -f \"$c\" \"$DEST\"; exit 0; fi\ndone\ntest -f \"$DEST\" && exit 0\nexit 0\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

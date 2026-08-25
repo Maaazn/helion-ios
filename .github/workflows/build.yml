@@ -59,8 +59,7 @@ jobs:
       - name: Build unsigned iphoneos
         run: |
           set -euo pipefail
-          OUT="$RUNNER_TEMP/out"
-          mkdir -p "$OUT"
+          set +e
           xcodebuild \
             -project src/MeloNX/MeloNX.xcodeproj \
             -scheme MeloNX \
@@ -75,28 +74,35 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             PRODUCT_BUNDLE_IDENTIFIER=com.maaazn.helion \
             INFOPLIST_KEY_CFBundleDisplayName=Helion \
-            CONFIGURATION_BUILD_DIR="$OUT" \
-            build
-          ls -la "$OUT"
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64 \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            build > "$RUNNER_TEMP/xcode.log" 2>&1
+          RC=$?
+          set -e
+          echo "xcodebuild rc=$RC"
+          grep -E 'error:|warning:|Undefined symbol|BUILD FAILED|BUILD SUCCEEDED|ld:' "$RUNNER_TEMP/xcode.log" | tail -80
+          tail -20 "$RUNNER_TEMP/xcode.log"
+          test "$RC" -eq 0
 
       - name: Sign and IPA
         run: |
           set -euo pipefail
-          OUT="$RUNNER_TEMP/out"
-          APP=$(find "$OUT" -maxdepth 2 -name '*.app' | head -1)
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Release-iphoneos/MeloNX.app' | head -1)
           test -n "$APP"
           echo "APP=$APP"
           ls -lh "$APP"
+          ls -lh "$APP/Frameworks" 2>/dev/null | head || true
           mkdir -p dist Payload
           rm -rf Payload/*
           cp -R "$APP" Payload/Helion.app
-          # sign nested first
           find Payload/Helion.app -name '*.framework' -o -name '*.dylib' -o -name '*.appex' | while read -r f; do
             codesign --force --sign "$IDENT" --timestamp=none "$f" || true
           done
           codesign --force --sign "$IDENT" --entitlements "$GITHUB_WORKSPACE/helion.entitlements" --generate-entitlement-der --timestamp=none Payload/Helion.app
           rm -f dist/Helion.ipa
-          (cd "$GITHUB_WORKSPACE" && zip -r -y dist/Helion.ipa Payload)
+          zip -r -y dist/Helion.ipa Payload
           ls -lh dist/Helion.ipa
 
       - name: Publish IPA
