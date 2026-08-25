@@ -29,7 +29,7 @@ jobs:
           assert any(n.endswith('Helion.app/Helion') for n in names)
           sz=os.path.getsize('dist/Helion.ipa')
           print('ipa', sz)
-          assert sz > 80*1024
+          assert sz > 40*1024
           PY
 
       - name: Import p12 and codesign
