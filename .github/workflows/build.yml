@@ -40,7 +40,7 @@ jobs:
 
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.0.2"
+          HELION_VERSION: "1.0.3"
           QEMU_DIR: ${{ github.workspace }}/.qemu-ios
         run: |
           set -euo pipefail
@@ -103,11 +103,11 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: Helion 1.0.2
+          tag_name: v1.0.3
+          name: Helion 1.0.3
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            1.0.2 — code fixes.
+            1.0.3 — code fixes.
 

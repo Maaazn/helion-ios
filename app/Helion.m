@@ -6,6 +6,8 @@
 #import <sys/stat.h>
 #import <sys/wait.h>
 #import <unistd.h>
+#import <errno.h>
+#import <string.h>
 
 extern char **environ;
 
@@ -91,12 +93,27 @@ extern char **environ;
     return [[[NSBundle mainBundle] bundlePath]
         stringByAppendingPathComponent:@"qemu-system-aarch64"];
 }
++ (unsigned long long)sizeAt:(NSString *)p {
+    NSNumber *n = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil][NSFileSize];
+    return n.unsignedLongLongValue;
+}
 + (BOOL)exists:(NSString *)p {
-    struct stat st;
-    return p && stat(p.fileSystemRepresentation, &st) == 0 && (st.st_mode & S_IXUSR);
+    return [self sizeAt:p] > 1000000ull;
 }
 + (BOOL)hasX86 { return [self exists:[self x86]]; }
 + (BOOL)hasARM { return [self exists:[self arm]]; }
++ (NSString *)stage:(NSString *)src name:(NSString *)name {
+    if (![self exists:src]) return src;
+    NSString *dst = [[HelionStore root] stringByAppendingPathComponent:name];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    unsigned long long a = [self sizeAt:src], b = [self sizeAt:dst];
+    if (a != b) {
+        [fm removeItemAtPath:dst error:nil];
+        [fm copyItemAtPath:src toPath:dst error:nil];
+    }
+    chmod(dst.fileSystemRepresentation, 0755);
+    return dst;
+}
 + (NSString *)version {
     NSString *bin = [self hasX86] ? [self x86] : [self arm];
     if (![self exists:bin]) return @"qemu-system not in this IPA\n";
@@ -139,8 +156,16 @@ extern char **environ;
         x86 = NO;
     if (!x86 && ![HelionQEMU hasARM])
         x86 = [HelionQEMU hasX86];
-    NSString *bin = x86 ? [HelionQEMU x86] : [HelionQEMU arm];
-    if (![HelionQEMU exists:bin]) { if (done) done(@"no qemu-system in IPA"); return; }
+    NSString *src = x86 ? [HelionQEMU x86] : [HelionQEMU arm];
+    if (![HelionQEMU exists:src]) {
+        unsigned long long xs = [HelionQEMU sizeAt:[HelionQEMU x86]];
+        unsigned long long asz = [HelionQEMU sizeAt:[HelionQEMU arm]];
+        if (done) done([NSString stringWithFormat:
+            @"no qemu-system (x86=%llu arm=%llu path=%@)", xs, asz, src]);
+        return;
+    }
+    NSString *bin = [HelionQEMU stage:src name:src.lastPathComponent];
+    if (log) log([NSString stringWithFormat:@"src=%@\nrun=%@\n", src, bin]);
     NSMutableArray *args = [NSMutableArray arrayWithObject:bin];
     if (x86) {
         [args addObjectsFromArray:@[@"-machine", @"q35", @"-cpu", @"qemu64",
@@ -197,7 +222,11 @@ extern char **environ;
     posix_spawn_file_actions_destroy(&a);
     close(fds[1]);
     free(argv);
-    if (rc) { close(fds[0]); if (done) done([NSString stringWithFormat:@"posix_spawn=%d", rc]); return; }
+    if (rc) {
+        close(fds[0]);
+        if (done) done([NSString stringWithFormat:@"posix_spawn=%d errno=%d %s", rc, errno, strerror(rc)]);
+        return;
+    }
     _pid = pid;
     int fd = fds[0];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -259,9 +288,11 @@ extern char **environ;
 - (void)banner {
     NSMutableString *s = [NSMutableString string];
     [s appendString:@"Helion\n\n"];
-    [s appendFormat:@"qemu-system-x86_64: %@\n", [HelionQEMU hasX86] ? @"YES" : @"NO"];
-    [s appendFormat:@"qemu-system-aarch64: %@\n", [HelionQEMU hasARM] ? @"YES" : @"NO"];
-    [s appendFormat:@"ISO: %@\n", [HelionStore isoPresent] ? [HelionStore isoPath].lastPathComponent : @"none — Add ISO"];
+    NSString *x = [HelionQEMU x86];
+    NSString *a = [HelionQEMU arm];
+    [s appendFormat:@"x86  %llu  %@\n", [HelionQEMU sizeAt:x], x.lastPathComponent];
+    [s appendFormat:@"arm  %llu  %@\n", [HelionQEMU sizeAt:a], a.lastPathComponent];
+    [s appendFormat:@"ISO  %@\n", [HelionStore isoPresent] ? @"guest.iso" : @"none"];
     _log.text = s;
 }
 - (void)append:(NSString *)t {
@@ -283,6 +314,7 @@ extern char **environ;
 didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSError *err = nil;
     BOOL ok = [HelionStore installISOFromURL:urls.firstObject error:&err];
+    [self banner];
     [self append:ok ? @"\nISO saved as guest.iso\n" :
         [NSString stringWithFormat:@"\nISO failed: %@\n", err.localizedDescription]];
 }

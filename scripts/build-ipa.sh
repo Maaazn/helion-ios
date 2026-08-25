@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-1.0.2}"
+VER="${HELION_VERSION:-1.0.3}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
