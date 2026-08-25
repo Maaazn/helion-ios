@@ -1139,6 +1139,8 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     }
 }
 @end
+
+@interface PuckApp : UIResponder <UIApplicationDelegate>
 @end
 @implementation PuckApp
 - (BOOL)application:(UIApplication *)a didFinishLaunchingWithOptions:(NSDictionary *)o { return YES; }
