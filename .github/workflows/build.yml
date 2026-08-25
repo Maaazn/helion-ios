@@ -74,7 +74,7 @@ jobs:
           ls -lh dist/Helion.ipa
 
       - name: Publish IPA
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v0.3.1
           name: Helion 0.3.1
