@@ -29,7 +29,7 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x scripts/build-ipa.sh distribution/ios/compile.sh
-          HELION_VERSION=0.3.0 scripts/build-ipa.sh
+          HELION_VERSION=0.3.1 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
@@ -76,8 +76,8 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.0
-          name: Helion 0.3.0
+          tag_name: v0.3.1
+          name: Helion 0.3.1
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa

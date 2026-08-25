@@ -43,7 +43,7 @@ static BOOL HelionLoadEngine(NSString **err) {
     GMain = dlsym(GLib, "main_ryujinx_sdl");
     GSetSize = dlsym(GLib, "set_view_size");
     if (!GMain) { *err = @"engine entry missing"; return NO; }
-    if (GInit) GInit();
+    // Do not call initialize here — it aborts on the UI thread (SDL / NativeAOT).
     return YES;
 }
 
@@ -107,6 +107,7 @@ static BOOL HelionLoadEngine(NSString **err) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ [self boot]; });
 }
 - (void)boot {
+    if (GInit) GInit();
     NSString *root = HelionRoot();
     NSMutableArray<NSString *> *a = [@[
         @"Helion",
@@ -211,7 +212,9 @@ static BOOL HelionLoadEngine(NSString **err) {
         [_list.bottomAnchor constraintEqualToAnchor:sc.bottomAnchor],
         [_list.widthAnchor constraintEqualToAnchor:sc.widthAnchor]
     ]];
-    [self reload];
+    _jit.text = @"Opening engine…";
+    _jit.textColor = HMute();
+    dispatch_async(dispatch_get_main_queue(), ^{ [self reload]; });
 }
 - (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; [self reload]; }
 - (void)reload {

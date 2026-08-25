@@ -479,35 +479,54 @@ namespace Ryujinx.Headless.SDL2
         [UnmanagedCallersOnly(EntryPoint = "initialize")]
         public static unsafe void Initialize()
         {
-            AppDataManager.Initialize(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
-
-            if (_virtualFileSystem == null)
+            try
             {
-                _virtualFileSystem = VirtualFileSystem.CreateInstance();
-            }
+                string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                if (string.IsNullOrEmpty(docs))
+                {
+                    docs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? ".", "Documents");
+                }
+                AppDataManager.Initialize(docs);
 
-            if (_libHacHorizonManager == null)
+                if (_virtualFileSystem == null)
+                {
+                    _virtualFileSystem = VirtualFileSystem.CreateInstance();
+                }
+
+                if (_libHacHorizonManager == null)
+                {
+                    _libHacHorizonManager = new LibHacHorizonManager();
+                    _libHacHorizonManager.InitializeFsServer(_virtualFileSystem);
+                    _libHacHorizonManager.InitializeArpServer();
+                    _libHacHorizonManager.InitializeBcatServer();
+                    _libHacHorizonManager.InitializeSystemClients();
+                }
+
+                if (_contentManager == null)
+                {
+                    _contentManager = new ContentManager(_virtualFileSystem);
+                }
+
+                if (_accountManager == null)
+                {
+                    _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient);
+                }
+
+                try
+                {
+                    _inputManager = new InputManager(new SDL2KeyboardDriver(), new NativeGamepadDriver());
+                }
+                catch (Exception ie)
+                {
+                    Console.WriteLine("input init skipped: " + ie);
+                }
+
+                GCSettings.LatencyMode = GCLatencyMode.Batch;
+            }
+            catch (Exception e)
             {
-                _libHacHorizonManager = new LibHacHorizonManager();
-                _libHacHorizonManager.InitializeFsServer(_virtualFileSystem);
-                _libHacHorizonManager.InitializeArpServer();
-                _libHacHorizonManager.InitializeBcatServer();
-                _libHacHorizonManager.InitializeSystemClients();
+                Console.WriteLine("initialize failed: " + e);
             }
-
-            if (_contentManager == null)
-            {
-                _contentManager = new ContentManager(_virtualFileSystem);
-            }
-            
-            if (_accountManager == null)
-            {
-                _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient);
-            }
-
-            _inputManager = new InputManager(new SDL2KeyboardDriver(), new NativeGamepadDriver());
-
-            GCSettings.LatencyMode = GCLatencyMode.Batch;
         }
 
         [UnmanagedCallersOnly(EntryPoint = "initialize-dualmapped")]
