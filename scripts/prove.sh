@@ -41,12 +41,8 @@ prove_bin() {
 
 prove_bin "$DIR/qemu-system-aarch64" qemu-system-aarch64
 prove_bin "$DIR/qemu-system-x86_64" qemu-system-x86_64
-if [[ -f "$DIR/libqemu-system-x86_64.dylib" ]]; then
-  prove_bin "$DIR/libqemu-system-x86_64.dylib" libqemu-system-x86_64.dylib
-fi
-if [[ -f "$DIR/libqemu-system-aarch64.dylib" ]]; then
-  prove_bin "$DIR/libqemu-system-aarch64.dylib" libqemu-system-aarch64.dylib
-fi
+prove_bin "$DIR/libqemu-system-x86_64.dylib" libqemu-system-x86_64.dylib
+prove_bin "$DIR/libqemu-system-aarch64.dylib" libqemu-system-aarch64.dylib
 
 if [[ -n "$APP" ]]; then
   echo "== Helion.app ==" | tee -a "$OUT"
@@ -54,6 +50,8 @@ if [[ -n "$APP" ]]; then
   prove_bin "$APP/Helion" Helion 20000
   [[ -f "$APP/qemu-system-aarch64" ]] || fail "qemu-system-aarch64 not copied into app"
   [[ -f "$APP/qemu-system-x86_64" ]] || fail "qemu-system-x86_64 not copied into app"
+  [[ -f "$APP/libqemu-system-x86_64.dylib" ]] || fail "libqemu-system-x86_64.dylib not in app"
+  [[ -f "$APP/libqemu-system-aarch64.dylib" ]] || fail "libqemu-system-aarch64.dylib not in app"
   [[ -f "$APP/QEMU-COPYING" ]] || fail "QEMU-COPYING missing"
   echo "PROOF_OK app" | tee -a "$OUT"
 fi
