@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
-VER="${HELION_VERSION:-1.8.0}"
+VER="${HELION_VERSION:-1.9.0}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 DIST="${HELION_DIST:-$ROOT/dist}"
@@ -17,8 +17,8 @@ cat > "$APP/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>Helion</string>
   <key>CFBundleIdentifier</key><string>com.maaazn.helion</string>
-  <key>CFBundleName</key><string>Puck</string>
-  <key>CFBundleDisplayName</key><string>Puck</string>
+  <key>CFBundleName</key><string>Puck Linux</string>
+  <key>CFBundleDisplayName</key><string>Puck Linux</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VER</string>
   <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER:-1}</string>
@@ -55,6 +55,9 @@ cat > "$APP/Info.plist" <<PLIST
       </array>
     </dict>
   </dict>
+  <key>UIStatusBarHidden</key><true/>
+  <key>UIViewControllerBasedStatusBarAppearance</key><true/>
+  <key>UIRequiresFullScreen</key><true/>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
   <key>UIApplicationSupportsIndirectInputEvents</key><true/>
   <key>UISupportsDocumentBrowser</key><false/>

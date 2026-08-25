@@ -1,12 +1,8 @@
-// Puck 1.8.0 — system pointer is AssistiveTouch. One setup, then it stays.
-//
-// Video proof (iPhone, USB mouse):
-//   AT off → 1 HID (USB Gaming Mouse), overlay only, no hover, no Home pointer.
-//   AT on  → 2 HID (virtual "Mouse" + USB), UIHoverGestureRecognizer fires,
-//            SpringBoard pointer on Home / Control Center.
-//   UIAccessibilityIsAssistiveTouchRunning and AX getters stay NO/free from a
-//   sideload. Truth is mice.count >= 2 or a hover event. Keep USB claimed.
-//   Always Show Menu off hides the nubbit. The setting itself is the permanence.
+// Puck Linux 1.9.0 — full-screen Tiny Core 16 (kernel 6.12.11) in v86.
+// Host pointer is hidden inside the app (prefersPointerLocked + hiddenPointerStyle).
+// AssistiveTouch remains the Home Screen pointer, outside this app.
+// No hypervisor: iPhone does not give HV/Virtualization to third-party apps.
+
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -1098,11 +1094,29 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task {}
 @end
 
-@interface PuckComputer : UIViewController <WKScriptMessageHandler>
+@interface PuckComputer : UIViewController <WKScriptMessageHandler, UIPointerInteractionDelegate>
 @end
 @implementation PuckComputer {
     WKWebView *_web;
     PuckAssets *_assets;
+}
+- (BOOL)prefersPointerLocked {
+    return YES;
+}
+- (BOOL)prefersStatusBarHidden {
+    return YES;
+}
+- (BOOL)prefersHomeIndicatorAutoHidden {
+    return YES;
+}
+- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {
+    return UIRectEdgeAll;
+}
+- (void)hideHostPointerOnView:(UIView *)view {
+    if (@available(iOS 13.4, *)) {
+        UIPointerInteraction *pi = [[UIPointerInteraction alloc] initWithDelegate:self];
+        [view addInteraction:pi];
+    }
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -1119,6 +1133,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _web.opaque = NO;
     _web.backgroundColor = Ink();
     _web.scrollView.bounces = NO;
+    _web.scrollView.scrollEnabled = NO;
+    _web.scrollView.delaysContentTouches = NO;
+    _web.scrollView.panGestureRecognizer.enabled = NO;
     _web.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     _web.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_web];
@@ -1128,14 +1145,30 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_web.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [_web.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
     ]];
+    [self hideHostPointerOnView:self.view];
+    [self hideHostPointerOnView:_web];
     [_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"puckasset://app/index.html"]]];
+}
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (@available(iOS 14.0, *)) {
+        [self setNeedsUpdateOfPrefersPointerLocked];
+    }
+    [self setNeedsStatusBarAppearanceUpdate];
+}
+- (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
+    UIView *v = interaction.view ?: self.view;
+    return [UIPointerRegion regionWithRect:v.bounds identifier:@"linux"];
+}
+- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region API_AVAILABLE(ios(13.4)) {
+    return [UIPointerStyle hiddenPointerStyle];
 }
 - (void)userContentController:(WKUserContentController *)c didReceiveScriptMessage:(WKScriptMessage *)msg {
     if (![msg.body isKindOfClass:[NSString class]]) return;
-    if ([msg.body isEqualToString:@"pointer"]) {
-        PuckHome *home = [PuckHome new];
-        home.modalPresentationStyle = UIModalPresentationFullScreen;
-        [self presentViewController:home animated:YES completion:nil];
+    if ([msg.body isEqualToString:@"lock"] || [msg.body isEqualToString:@"pointer"]) {
+        if (@available(iOS 14.0, *)) {
+            [self setNeedsUpdateOfPrefersPointerLocked];
+        }
     }
 }
 @end
