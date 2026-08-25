@@ -10,11 +10,16 @@ def ninja_link(bdir: Path, target: str) -> list[str]:
     raw = r.stdout
     Path("/tmp/ninja-commands.txt").write_text(raw[:8000] + "\n---stderr---\n" + (r.stderr or "")[:2000])
     print("ninja_commands_bytes", len(raw), "lines", len(raw.splitlines()))
-    print("ninja_commands_tail", repr(raw[-500:]))
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
-    if not lines:
+    cands = [l for l in lines if "clang" in l and "qemu-system-x86_64" in l and " -o " in l]
+    if not cands:
+        cands = [l for l in lines if "clang" in l and "-o" in l and "qemu-system" in l]
+    if not cands:
+        print("NO_CLANG_LINK_LINE")
+        print("ninja_commands_tail", repr(raw[-400:]))
         return []
-    cmd = lines[-1]
+    cmd = max(cands, key=len)
+    print("picked_link_len", len(cmd), "head", cmd[:180])
     while True:
         m = re.match(r"^[A-Za-z0-9_]+=\S+\s+(.*)$", cmd)
         if not m:
