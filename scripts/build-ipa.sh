@@ -138,10 +138,11 @@ if [[ -n "${QEMU_DIR:-}" && -d "${QEMU_DIR:-}/src-qemu/build" ]]; then
   fi
 fi
 if [[ "$QEMU_LINKED" != 1 ]]; then
-  echo "HELION_QEMU_STATIC=0 fallback UI-only link"
+  echo "HELION_QEMU_STATIC=0 using allowed undefined qemu_* for UI"
   xcrun --sdk iphoneos clang \
     -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
     -fobjc-arc -fblocks \
+    -Wl,-U,_qemu_init -Wl,-U,_qemu_main_loop -Wl,-U,_qemu_cleanup \
     -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
     -framework GameController -framework CoreGraphics -framework QuartzCore \
     "$OUT/Helion.o" \
