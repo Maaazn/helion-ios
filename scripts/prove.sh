@@ -27,7 +27,7 @@ prove_bin() {
     local hdr
     hdr=$(otool -hv "$p" 2>/dev/null || true)
     echo "$hdr" | grep -q ARM64 || fail "$name not ARM64"
-    echo "$hdr" | grep -q EXECUTE || fail "$name not MH_EXECUTE"
+    echo "$hdr" | grep -qE 'EXECUTE|DYLIB' || fail "$name not MH_EXECUTE/DYLIB"
   fi
   if command -v vtool >/dev/null; then
     vtool -show-build "$p" 2>/dev/null | tee -a "$OUT" || true
@@ -41,6 +41,12 @@ prove_bin() {
 
 prove_bin "$DIR/qemu-system-aarch64" qemu-system-aarch64
 prove_bin "$DIR/qemu-system-x86_64" qemu-system-x86_64
+if [[ -f "$DIR/libqemu-system-x86_64.dylib" ]]; then
+  prove_bin "$DIR/libqemu-system-x86_64.dylib" libqemu-system-x86_64.dylib
+fi
+if [[ -f "$DIR/libqemu-system-aarch64.dylib" ]]; then
+  prove_bin "$DIR/libqemu-system-aarch64.dylib" libqemu-system-aarch64.dylib
+fi
 
 if [[ -n "$APP" ]]; then
   echo "== Helion.app ==" | tee -a "$OUT"

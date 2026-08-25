@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-1.0.3}"
+VER="${HELION_VERSION:-1.1.0}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
@@ -77,6 +77,9 @@ if [[ -n "${QEMU_DIR:-}" && -d "$QEMU_DIR" ]]; then
   for f in "$QEMU_DIR"/*COPYING*; do [[ -f "$f" ]] && cp "$f" "$APP/"; done
   [[ -f "$QEMU_DIR/qemu-system-aarch64" ]] && cp "$QEMU_DIR/qemu-system-aarch64" "$APP/" && chmod +x "$APP/qemu-system-aarch64"
   [[ -f "$QEMU_DIR/qemu-system-x86_64" ]] && cp "$QEMU_DIR/qemu-system-x86_64" "$APP/" && chmod +x "$APP/qemu-system-x86_64"
+  for d in "$QEMU_DIR"/libqemu-system-*.dylib; do
+    [[ -f "$d" ]] && cp "$d" "$APP/" && chmod +x "$d"
+  done
   [[ -f "$QEMU_DIR/qemu-build.log" ]] && cp "$QEMU_DIR/qemu-build.log" "$APP/"
   if [[ -d "$QEMU_DIR/osxkvm" ]]; then
     mkdir -p "$APP/OSX-KVM"
@@ -124,6 +127,7 @@ xcrun --sdk iphoneos clang \
   -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc -fblocks \
   -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
+  -framework GameController \
   "$ROOT/app/Helion.m" \
   -o "$BIN"
 

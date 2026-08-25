@@ -296,7 +296,7 @@ set +e
   --disable-guest-agent \
   --disable-sdl \
   --disable-gtk \
-  --disable-vnc \
+  --enable-vnc \
   --disable-vte \
   --disable-gnutls \
   --disable-nettle \
@@ -352,7 +352,7 @@ if [[ ! -f "$SRC/build/build.ninja" ]]; then
     -Dvmnet=disabled \
     -Dcoreaudio=disabled \
     -Dpvg=disabled \
-    -Dvnc=disabled \
+    -Dvnc=enabled \
     -Dsdl=disabled \
     -Dgtk=disabled \
     -Dcoroutine_backend=sigaltstack \
@@ -395,6 +395,44 @@ if [[ -n "$BIN64" ]]; then
 else
   echo "QEMU_X86_MISSING"
 fi
+
+# UTM path: dylib + qemu_init in-process. iOS posix_spawn of MH_EXECUTE is EPERM.
+relink_dylib() {
+  local exe="$1" dest="$2"
+  local bdir="$SRC/build"
+  [[ -f "$bdir/$exe" ]] || return 0
+  local cmd
+  cmd=$(ninja -C "$bdir" -t commands "$exe" 2>/dev/null | tail -1 || true)
+  if [[ -z "$cmd" ]]; then
+    echo "RELIRK_NO_CMD $exe"
+    return 0
+  fi
+  python3 - "$cmd" "$bdir" "$dest" <<'PY'
+import os, shlex, subprocess, sys
+cmd, bdir, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+parts = shlex.split(cmd)
+out = []
+i = 0
+while i < len(parts):
+    if parts[i] == "-o" and i + 1 < len(parts):
+        out += ["-dynamiclib",
+                "-install_name", "@executable_path/" + os.path.basename(dest),
+                "-o", dest]
+        i += 2
+        continue
+    out.append(parts[i])
+    i += 1
+print("relink", dest)
+r = subprocess.run(out, cwd=bdir)
+print("relink_exit", r.returncode, dest)
+sys.exit(r.returncode)
+PY
+}
+
+relink_dylib qemu-system-aarch64 "$OUT/libqemu-system-aarch64.dylib" || echo "relink_arm_fail"
+relink_dylib qemu-system-x86_64 "$OUT/libqemu-system-x86_64.dylib" || echo "relink_x86_fail"
+ls -lh "$OUT"/libqemu-system-*.dylib 2>/dev/null || true
+file "$OUT"/libqemu-system-*.dylib 2>/dev/null || true
 
 echo "=== OSX-KVM firmware (OpenCore/OVMF, not macOS) ==="
 KVM="$OUT/src-osxkvm"
