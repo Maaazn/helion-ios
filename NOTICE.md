@@ -1,8 +1,9 @@
-Helion is original iOS host + NCE + Metal code.
+Helion is a fork of Ryujinx for iPhone.
 
-Not MeloNX, not Ryujinx, not Yuzu, not UTM, not QEMU.
+Ryujinx — MIT — gdkchan and contributors, continued by Ryubing.
+MeloNX — AGPL-3.0 — Stossy11 / MeloNX team (iOS host, Metal/SDL, JIT).
+MeloVertex — unofficial iOS fixes used as the starting tree.
 
-Nintendo Switch is a trademark of Nintendo. Helion is not affiliated with Nintendo.
+Helion is not affiliated with those projects.
 
-User-supplied prod.keys, firmware, and game dumps stay on the device.
-This project does not distribute those files.
+This repository does not ship keys, firmware, or game dumps.

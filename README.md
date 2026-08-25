@@ -1,7 +1,9 @@
 # Helion
 
-Nintendo Switch emulator for iPhone. Original host. Not MeloNX. Not affiliated with Nintendo.
+Advanced fork of Ryujinx for iOS.
 
-Bring your own dumps from hardware you own. No keys, firmware, or games are included.
+Upstream engine: Ryujinx (MIT). iOS host: MeloNX (AGPL). This tree is a fork, not affiliated with those authors.
+
+Bring files from hardware you own. Nothing of that kind is shipped here.
 
 JIT: StikDebug / SideStore.
