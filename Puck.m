@@ -1,5 +1,4 @@
-// Puck 1.2 — in-app cursor studio. Custom .cur/.png is visual-only.
-// Other apps use Apple's pointer (AssistiveTouch / Pointer Control).
+// Puck 1.3 — iPhone system pointer = AssistiveTouch (Apple). Hide the menu button.
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -24,6 +23,76 @@ static void PuckOpenPrefs(NSArray<NSString *> *urls) {
             return;
         }
     }
+}
+
+static void PuckLoadAX(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities", RTLD_NOW);
+        dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW);
+    });
+}
+
+static id PuckAXSettings(void) {
+    PuckLoadAX();
+    Class c = NSClassFromString(@"AXSettings");
+    if (!c) return nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    for (NSString *s in @[@"sharedInstance", @"sharedSettings", @"shared"]) {
+        SEL sel = NSSelectorFromString(s);
+        if ([c respondsToSelector:sel]) return [c performSelector:sel];
+    }
+#pragma clang diagnostic pop
+    return nil;
+}
+
+static BOOL PuckAXCallC(const char *name, BOOL on) {
+    PuckLoadAX();
+    void (*fn)(BOOL) = dlsym(RTLD_DEFAULT, name);
+    if (!fn) return NO;
+    fn(on);
+    return YES;
+}
+
+static BOOL PuckAXSet(id obj, NSString *name, BOOL on) {
+    if (!obj) return NO;
+    SEL sel = NSSelectorFromString(name);
+    if (![obj respondsToSelector:sel]) return NO;
+    NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
+    if (!sig || sig.numberOfArguments < 3) return NO;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = obj;
+    inv.selector = sel;
+    const char *t = [sig getArgumentTypeAtIndex:2];
+    if (t && t[0] == '@') {
+        id v = on ? @YES : @NO;
+        [inv setArgument:&v atIndex:2];
+    } else {
+        BOOL v = on;
+        [inv setArgument:&v atIndex:2];
+    }
+    [inv invoke];
+    return YES;
+}
+
+static NSString *PuckEnableIPhonePointer(void) {
+    NSMutableArray *hit = [NSMutableArray new];
+    id ax = PuckAXSettings();
+    BOOL at = NO;
+    at |= PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
+    at |= PuckAXCallC("_AXSAssistiveTouchSetEnabled", YES);
+    at |= PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
+    if (at) [hit addObject:@"AssistiveTouch on"];
+    BOOL menu = NO;
+    menu |= PuckAXCallC("AXSAssistiveTouchAlwaysShowMenuSetEnabled", NO);
+    menu |= PuckAXCallC("AXSAlwaysShowMenuSetEnabled", NO);
+    menu |= PuckAXSet(ax, @"setAlwaysShowMenuEnabled:", NO);
+    menu |= PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
+    menu |= PuckAXSet(ax, @"setAlwaysShowMenu:", NO);
+    if (menu) [hit addObject:@"button hidden"];
+    if (!hit.count) return nil;
+    return [hit componentsJoinedByString:@" · "];
 }
 
 static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
@@ -183,6 +252,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     id _disconnectObs;
     NSArray<UIButton *> *_shapeBtns;
     NSArray<UIButton *> *_deskBtns;
+    UILabel *_sysNote;
     NSInteger _pickKind; // 0 cursor, 1 wallpaper
 }
 - (void)dealloc {
@@ -322,9 +392,17 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *sys = [self mintBtn:@"Pointer Control  (system)" action:@selector(systemPointer)];
+    UIButton *sys = [self mintBtn:@"Show iPhone pointer" action:@selector(systemPointer)];
     sys.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:sys];
+
+    _sysNote = [UILabel new];
+    _sysNote.text = @"iPhone pointer is AssistiveTouch. We hide the button.";
+    _sysNote.textColor = Dim();
+    _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+    _sysNote.numberOfLines = 2;
+    _sysNote.translatesAutoresizingMaskIntoConstraints = NO;
+    [bar addSubview:_sysNote];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -377,7 +455,10 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [sys.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [sys.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [sys.heightAnchor constraintEqualToConstant:40],
-        [sys.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor]
+        [_sysNote.topAnchor constraintEqualToAnchor:sys.bottomAnchor constant:4],
+        [_sysNote.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
+        [_sysNote.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
+        [_sysNote.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor]
     ]];
 
     __weak PuckHome *wself = self;
@@ -613,10 +694,17 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     }
 }
 - (void)systemPointer {
+    NSString *ok = PuckEnableIPhonePointer();
+    if (ok) {
+        _sysNote.text = ok;
+        _status.text = ok;
+        return;
+    }
+    _sysNote.text = @"Open AssistiveTouch, then turn off Always Show Menu.";
     PuckOpenPrefs(@[
-        @"App-prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
-        @"prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
         @"App-prefs:root=ACCESSIBILITY&path=TOUCH/ASSISTIVE_TOUCH",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH/ASSISTIVE_TOUCH",
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH",
         @"App-prefs:root=ACCESSIBILITY"
     ]);
 }
