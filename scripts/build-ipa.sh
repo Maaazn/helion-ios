@@ -3,15 +3,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
+VER="${HELION_VERSION:-1.0.0}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
-FW="$APP/Frameworks"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-0.3.0}"
-IDENT_ARM=arm64
 
 rm -rf "$OUT"
-mkdir -p "$APP" "$FW" "$DIST" "$APP/HelionBridge.framework"
+mkdir -p "$APP" "$DIST"
 
 cat > "$APP/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -19,8 +17,8 @@ cat > "$APP/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>Helion</string>
   <key>CFBundleIdentifier</key><string>com.maaazn.helion</string>
-  <key>CFBundleName</key><string>Helion</string>
-  <key>CFBundleDisplayName</key><string>Helion</string>
+  <key>CFBundleName</key><string>Puck</string>
+  <key>CFBundleDisplayName</key><string>Puck</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VER</string>
   <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER:-1}</string>
@@ -35,7 +33,7 @@ cat > "$APP/Info.plist" <<PLIST
       <key>UIWindowSceneSessionRoleApplication</key>
       <array><dict>
         <key>UISceneConfigurationName</key><string>Default</string>
-        <key>UISceneDelegateClassName</key><string>HelionSceneDelegate</string>
+        <key>UISceneDelegateClassName</key><string>PuckScene</string>
       </dict></array>
     </dict>
   </dict>
@@ -45,7 +43,6 @@ cat > "$APP/Info.plist" <<PLIST
     <string>UIInterfaceOrientationLandscapeLeft</string>
     <string>UIInterfaceOrientationLandscapeRight</string>
   </array>
-  <key>UIFileSharingEnabled</key><true/>
   <key>CFBundleIcons</key>
   <dict>
     <key>CFBundlePrimaryIcon</key>
@@ -59,6 +56,7 @@ cat > "$APP/Info.plist" <<PLIST
     </dict>
   </dict>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
+  <key>GCSupportsGameMode</key><false/>
 </dict></plist>
 PLIST
 
@@ -68,20 +66,48 @@ w=h=1024
 def chunk(tag, data):
     return struct.pack('>I', len(data))+tag+data+struct.pack('>I', zlib.crc32(tag+data)&0xffffffff)
 rows=[]
-cx=cy=512
 for y in range(h):
     row=bytearray([0])
     for x in range(w):
-        dx,dy=x-cx,y-cy
-        r=math.hypot(dx,dy)/340
-        ang=math.atan2(dy,dx)
-        ray=abs(math.cos(ang*4))**8
-        core=max(0,1-r)
-        gold=min(1, core*1.2 + ray*(1-min(1,r))*0.55)
-        bg=12
-        R=int(bg + gold*230); G=int(bg + gold*170); B=int(bg + gold*55)
-        if r<0.12: R=G=B=255
-        row += bytes([min(255,R), min(255,G), min(255,B)])
+        # ink field
+        R,G,B=10,12,16
+        # mouse body (capsule)
+        mx,my=512,430
+        dx,dy=(x-mx)/180.0,(y-my)/260.0
+        body=dx*dx+dy*dy
+        if body<1:
+            shade=int(28+40*(1-body))
+            R,G,B=shade, shade+4, shade+10
+        # left/right buttons split
+        if body<0.72 and y<430:
+            if x<512: R,G,B=36,40,50
+            else: R,G,B=42,46,58
+        # scroll wheel
+        if abs(x-512)<18 and abs(y-400)<36:
+            R,G,B=18,22,28
+        # mint puck pointer (the missing iPhone cursor)
+        px,py=700,300
+        pr=math.hypot(x-px,y-py)
+        if pr<78:
+            t=max(0,1-pr/78)
+            glow=int(80*t)
+            R=min(255,R+int(120*t)); G=min(255,G+int(255*t)); B=min(255,B+int(200*t))
+            if 52<pr<64:
+                R,G,B=125,255,204
+            if pr<22:
+                R,G,B=240,255,248
+        # beam from mouse to puck
+        # line from (560,360) to (700,300)
+        ax,ay,bx,by=560,360,700,300
+        vx,vy=bx-ax,by-ay
+        llen=math.hypot(vx,vy) or 1
+        t=((x-ax)*vx+(y-ay)*vy)/(llen*llen)
+        if 0<=t<=1:
+            qx,qy=ax+t*vx,ay+t*vy
+            d=math.hypot(x-qx,y-qy)
+            if d<6:
+                R=min(255,R+90); G=min(255,G+160); B=min(255,B+120)
+        row += bytes([R,G,B])
     rows.append(bytes(row))
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR', struct.pack('>IIBBBBB', w,h,8,2,0,0,0))
 png+=chunk(b'IDAT', zlib.compress(b''.join(rows),9))+chunk(b'IEND', b'')
@@ -93,58 +119,12 @@ do
   sips -z "$size" "$size" "$APP/AppIcon1024x1024.png" --out "$APP/$name" >/dev/null
 done
 
-# engine
-chmod +x "$ROOT/distribution/ios/compile.sh"
-( cd "$ROOT" && ./distribution/ios/compile.sh )
-DYLIB=""
-for c in \
-  "$ROOT/src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/publish/Ryujinx.Headless.SDL2.dylib" \
-  "$ROOT/src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/native/Ryujinx.Headless.SDL2.dylib" \
-  "$ROOT/src/MeloNX/MeloNX/Dependencies/Dynamic Libraries/Ryujinx.Headless.SDL2.dylib"
-do
-  [[ -f "$c" ]] && DYLIB="$c" && break
-done
-test -n "$DYLIB"
-cp -f "$DYLIB" "$FW/Ryujinx.Headless.SDL2.dylib"
-
-# HelionBridge.framework
-xcrun --sdk iphoneos clang -arch "$IDENT_ARM" -miphoneos-version-min="$MIN" -isysroot "$SDK" \
-  -dynamiclib -install_name @rpath/HelionBridge.framework/HelionBridge \
-  "$ROOT/host/HelionBridge.c" -o "$APP/HelionBridge.framework/HelionBridge"
-cat > "$APP/HelionBridge.framework/Info.plist" <<'PL'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>HelionBridge</string>
-  <key>CFBundleIdentifier</key><string>com.maaazn.helion.bridge</string>
-  <key>CFBundleName</key><string>HelionBridge</string>
-  <key>CFBundlePackageType</key><string>FMWK</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>MinimumOSVersion</key><string>16.0</string>
-</dict></plist>
-PL
-cp -R "$APP/HelionBridge.framework" "$FW/HelionBridge.framework"
-
-# third-party from host/deps if present
-if [[ -d "$ROOT/host/deps/XCFrameworks" ]]; then
-  for f in SDL2 libavcodec libavutil libavformat libavfilter libswscale libswresample libSPIRV; do
-    BIN="$ROOT/host/deps/XCFrameworks/${f}.xcframework/ios-arm64/${f}.framework"
-    if [[ -d "$BIN" ]]; then cp -R "$BIN" "$FW/"; fi
-  done
-fi
-if [[ -f "$ROOT/host/deps/libMoltenVK.dylib" ]]; then
-  cp -f "$ROOT/host/deps/libMoltenVK.dylib" "$FW/"
-fi
-
-xcrun --sdk iphoneos clang -arch "$IDENT_ARM" -miphoneos-version-min="$MIN" -isysroot "$SDK" \
+xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc \
-  -framework Foundation -framework UIKit -framework Metal -framework MetalKit \
-  -framework UniformTypeIdentifiers -framework QuartzCore -framework CoreGraphics \
-  -rpath @executable_path/Frameworks \
-  "$ROOT/host/Helion.m" -o "$APP/Helion"
+  -framework Foundation -framework UIKit -framework GameController \
+  -framework CoreGraphics -framework QuartzCore \
+  "$ROOT/Puck.m" -o "$APP/Helion"
 
-ls -lh "$APP/Helion" "$FW/Ryujinx.Headless.SDL2.dylib"
-mkdir -p "$DIST"
+ls -lh "$APP/Helion"
 ( cd "$OUT" && zip -r -y "$DIST/Helion.ipa" Payload )
 ls -lh "$DIST/Helion.ipa"

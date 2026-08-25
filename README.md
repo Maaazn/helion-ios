@@ -1,7 +1,5 @@
-# Helion
+# Puck
 
-Advanced fork of Ryujinx for iOS.
+Pointer for iPhone.
 
-Original iOS host. Engine is Ryujinx (MIT). Not MeloNX. Not affiliated.
-
-Bring files from hardware you own.
+The system cursor on iPhone is tied to AssistiveTouch. Puck draws a live cursor from the mouse the moment it connects, and can hide or show it. Use System pointer to open AssistiveTouch for the home screen.
