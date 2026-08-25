@@ -10,6 +10,7 @@
 #import <errno.h>
 #import <string.h>
 #import <sys/stat.h>
+#import <pthread.h>
 #import <stdio.h>
 
 extern char **environ;
@@ -100,8 +101,48 @@ static void HLog(NSString *fmt, ...) {
 @end
 @implementation HelionEngine {
     void *_dl;
+    pthread_t _thr;
 }
 static HelionEngine *GEng;
+
+struct HelionQRun {
+    int argc;
+    char **argv;
+    int (*qinit)(int, char **, char **);
+    void (*qloop)(void);
+    int (*qmain)(int, char **);
+    char logpath[1024];
+};
+
+static void *HelionQemuPthread(void *arg) {
+    struct HelionQRun *r = arg;
+    int fd = open(r->logpath, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd >= 0) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        if (fd > 2) close(fd);
+    }
+    fprintf(stderr, "[qemu-thread] start stack=8M\n");
+    fflush(stderr);
+    if (r->qinit) {
+        fprintf(stderr, "[qemu-thread] qemu_init argc=%d\n", r->argc);
+        fflush(stderr);
+        int rc = r->qinit(r->argc, r->argv, environ);
+        fprintf(stderr, "[qemu-thread] qemu_init rc=%d\n", rc);
+        fflush(stderr);
+        if (rc == 0 && r->qloop) {
+            fprintf(stderr, "[qemu-thread] qemu_main_loop\n");
+            fflush(stderr);
+            r->qloop();
+        }
+    } else if (r->qmain) {
+        r->qmain(r->argc, r->argv);
+    }
+    fprintf(stderr, "[qemu-thread] exit\n");
+    fflush(stderr);
+    if (GEng) GEng.running = NO;
+    return NULL;
+}
 + (instancetype)shared {
     static dispatch_once_t o;
     dispatch_once(&o, ^{ GEng = [HelionEngine new]; });
@@ -123,22 +164,26 @@ static HelionEngine *GEng;
 }
 + (NSString *)status {
     unsigned long long xs = [self sz:[self libX86]];
-    unsigned long long bios = [self sz:[self bios:@"edk2-x86_64-code.fd"]];
-    return [NSString stringWithFormat:@"framework %llu\nEDK2 %llu", xs, bios];
+    unsigned long long bios = [self sz:[self bios:@"bios.bin"]];
+    unsigned long long vga = [self sz:[self bios:@"vgabios-stdvga.bin"]];
+    return [NSString stringWithFormat:@"framework %llu\nbios.bin %llu  vga %llu", xs, bios, vga];
 }
 - (NSArray *)argvFor:(NSString *)kind {
     [HelionStore ensureDisk:kind];
 
     // MINIMAL argv — strip everything that can hang init
+    NSString *biosDir = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"qemu"];
     NSMutableArray *a = [NSMutableArray arrayWithObjects:
         @"qemu-system-x86_64",
+        @"-L", biosDir,
         @"-machine", @"q35",
         @"-cpu", @"qemu64",
         @"-accel", @"tcg",
         @"-m", @"1024",
         @"-smp", @"2",
-        @"-display", @"vnc=127.0.0.1:0",
+        @"-display", @"vnc=127.0.0.1:0,to=0",
         @"-vga", @"std",
+        @"-serial", @"stdio",
         @"-usb", @"-device", @"usb-tablet",
         @"-boot", @"order=c",
         nil];
@@ -184,7 +229,7 @@ static HelionEngine *GEng;
 
     // reset log
     [@"" writeToFile:[HelionStore logPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    HLog(@"=== Helion 1.4.0 ===");
+    HLog(@"=== Helion 1.4.1 ===");
     HLog(@"kind=%@", kind);
 
     NSArray *args = [self argvFor:kind];
@@ -225,32 +270,27 @@ static HelionEngine *GEng;
 
     self.running = YES;
     if (log) log(@"Calling qemu_init…");
-    HLog(@"calling entry on background thread…");
+    HLog(@"calling qemu on 8MB pthread (not GCD)");
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        HLog(@"thread started");
-        @try {
-            if (qinit) {
-                HLog(@"→ qemu_init(argc=%d)", argc);
-                int rc = qinit(argc, argv, environ);
-                HLog(@"← qemu_init returned %d", rc);
-                if (rc == 0 && qloop) {
-                    HLog(@"→ qemu_main_loop");
-                    qloop();
-                    HLog(@"← qemu_main_loop ended");
-                }
-            } else {
-                HLog(@"→ main(argc=%d)", argc);
-                int rc = qmain(argc, argv);
-                HLog(@"← main returned %d", rc);
-            }
-        } @catch (NSException *ex) {
-            HLog(@"EXCEPTION: %@ %@", ex.name, ex.reason);
-        }
+    struct HelionQRun *run = calloc(1, sizeof(*run));
+    run->argc = argc;
+    run->argv = argv;
+    run->qinit = qinit;
+    run->qloop = qloop;
+    run->qmain = qmain;
+    strncpy(run->logpath, [HelionStore logPath].fileSystemRepresentation, 1023);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8u << 20);
+    int prc = pthread_create(&_thr, &attr, HelionQemuPthread, run);
+    pthread_attr_destroy(&attr);
+    if (prc != 0) {
+        HLog(@"pthread_create failed %d", prc);
         self.running = NO;
-        HLog(@"engine thread exit");
-        if (log) dispatch_async(dispatch_get_main_queue(), ^{ log(@"QEMU exited"); });
-    });
+        return [NSString stringWithFormat:@"pthread_create %d", prc];
+    }
+    pthread_detach(_thr);
     return nil;
 }
 - (void)stop {

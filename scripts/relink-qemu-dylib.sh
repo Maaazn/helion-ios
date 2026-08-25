@@ -29,15 +29,12 @@ cat > "$FW/Info.plist" <<'PLIST'
   <key>MinimumOSVersion</key><string>16.0</string>
 </dict></plist>
 PLIST
-# firmware — QEMU pc-bios (GPL), not Apple OS
+# firmware — QEMU pc-bios (GPL). Skip 64MB ARM EDK2 blobs.
 BIOS="$OUT/bios"
 mkdir -p "$BIOS"
 for src in "$OUT/src-qemu/pc-bios" "$BDIR/pc-bios"; do
   [[ -d "$src" ]] || continue
-  for f in edk2-x86_64-code.fd edk2-i386-vars.fd edk2-x86_64-secure-code.fd \
-           vgabios-stdvga.bin vgabios.bin kvmvapic.bin efi-e1000.rom efi-virtio.rom; do
-    [[ -f "$src/$f" ]] && cp "$src/$f" "$BIOS/"
-  done
+  find "$src" -maxdepth 1 \( -name '*.bin' -o -name '*.rom' -o -name '*.fd' \) -size -6M -exec cp {} "$BIOS/" \;
 done
 ls -lh "$FW/qemu-x86_64-softmmu" "$BIOS" || true
 file "$FW/qemu-x86_64-softmmu" || true
