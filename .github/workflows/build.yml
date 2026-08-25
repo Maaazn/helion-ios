@@ -11,74 +11,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  prove:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build QEMU for iphoneos (GPL-2.0, named)
+      - name: Build QEMU for iphoneos
         timeout-minutes: 90
         run: |
           set -uo pipefail
-          chmod +x scripts/build-qemu-ios.sh
+          chmod +x scripts/build-qemu-ios.sh scripts/prove.sh scripts/build-ipa.sh
           scripts/build-qemu-ios.sh "$RUNNER_TEMP/qemu-ios"
-          ls -lh "$RUNNER_TEMP/qemu-ios"/qemu-system-* 2>/dev/null || true
 
-      - name: Compile Helion IPA
+      - name: Prove QEMU binaries
+        run: |
+          set -euo pipefail
+          chmod +x scripts/prove.sh
+          scripts/prove.sh "$RUNNER_TEMP/qemu-ios" "" "$RUNNER_TEMP/PROOF-qemu.txt"
+          cat "$RUNNER_TEMP/PROOF-qemu.txt"
+
+      - name: Compile Helion.app
         env:
           HELION_VERSION: "0.1.0"
           QEMU_DIR: ${{ runner.temp }}/qemu-ios
         run: |
           set -euo pipefail
-          chmod +x scripts/build-ipa.sh
           scripts/build-ipa.sh
-          mkdir -p dist
-          cp dist/Helion.ipa dist/Helion.ipa
-          ls -lh dist
+          # build-ipa.sh zips internally; that zip is not a release.
 
-      - name: Import p12 and codesign
-        env:
-          CERT_BASE64: ${{ secrets.IOS_SIGNING_CERTIFICATE_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
-          CERT_PATH: ${{ runner.temp }}/signing.p12
-          KEYCHAIN_PATH: ${{ runner.temp }}/build.keychain-db
-          KEYCHAIN_PASSWORD: temporary-keychain-password
+      - name: Prove app contains engine
         run: |
           set -euo pipefail
-          test -n "${CERT_BASE64:-}"
-          python3 - <<'PY'
-          import base64, os
-          open(os.environ["CERT_PATH"], "wb").write(base64.b64decode(os.environ["CERT_BASE64"]))
-          PY
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          IDENT=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | python3 -c 'import sys,re; t=sys.stdin.read(); m=re.search(r"\"([^\"]+)\"", t); print(m.group(1) if m else "")')
-          echo "identity=$IDENT"
           APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
-          ENT="$GITHUB_WORKSPACE/app/Helion.entitlements"
-          if [[ -f "$APP/qemu-system-aarch64" ]]; then
-            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-aarch64"
-          fi
-          if [[ -f "$APP/qemu-system-x86_64" ]]; then
-            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-x86_64"
-          fi
-          codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP"
-          rm -f dist/Helion.ipa
-          (cd "$GITHUB_WORKSPACE/build/ipa" && zip -r -y "$GITHUB_WORKSPACE/dist/Helion.ipa" Payload)
-          ls -lh dist/Helion.ipa
-          unzip -l dist/Helion.ipa | grep -E 'qemu-system|QEMU-COPYING|Helion' | head
+          scripts/prove.sh "$RUNNER_TEMP/qemu-ios" "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
+          cat "$GITHUB_WORKSPACE/PROOF.txt"
 
-      - name: Publish IPA
-        uses: softprops/action-gh-release@v2
+      - name: Upload proof
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v0.1.0
-          name: Helion 0.1.0
-          prerelease: false
-          make_latest: true
-          files: dist/Helion.ipa
-          body: |
-            0.1.0 — code fixes.
+          name: helion-proof
+          path: |
+            PROOF.txt
+            build/ipa/Payload/Helion.app/Helion
+          if-no-files-found: error
+
+      # No GitHub Release. No published IPA.
