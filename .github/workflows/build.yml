@@ -47,7 +47,7 @@ jobs:
 
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.1.2"
+          HELION_VERSION: "1.2.0"
           QEMU_DIR: ${{ github.workspace }}/.qemu-ios
         run: |
           set -euo pipefail
@@ -113,11 +113,15 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.2
-          name: Helion 1.1.2
+          tag_name: v1.2.0
+          name: Helion 1.2.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            1.1.2 — code fixes.
-
+            1.2.0 — Major host rewrite
+            • Real status feedback instead of dumping the full QEMU command
+            • Robust VNC client with longer retry + clear messages
+            • Cleaner session UI with spinner, status and Stop button
+            • Better Windows boot args (-boot order=dc, more RAM, multi-thread TCG)
+            • Home screen polish + JIT reminder
