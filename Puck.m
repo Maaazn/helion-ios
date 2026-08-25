@@ -1,9 +1,10 @@
-// Puck 1.5 — pointer via AT hardware path; hide nubbit (Always Show Menu).
+// Puck 1.6.3 — release HID from AssistiveTouch; open real Settings pages.
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <dlfcn.h>
 #import <notify.h>
 
@@ -16,13 +17,48 @@ static UIColor *Pearl(void) { return [UIColor colorWithRed:0.96 green:0.97 blue:
 static UIColor *Card(void)  { return [UIColor colorWithRed:0.10 green:0.11 blue:0.14 alpha:1]; }
 static UIColor *Dim(void)   { return [UIColor colorWithWhite:0.55 alpha:1]; }
 
+static BOOL PuckOpenSensitive(NSString *s) {
+    NSURL *u = [NSURL URLWithString:s];
+    if (!u) return NO;
+    static int (*sbs)(CFURLRef, Boolean) = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_NOW);
+        if (h) sbs = dlsym(h, "SBSOpenSensitiveURLAndUnlock");
+    });
+    if (sbs && sbs((__bridge CFURLRef)u, true) == 0) return YES;
+    Class LS = NSClassFromString(@"LSApplicationWorkspace");
+    if (LS) {
+        SEL def = @selector(defaultWorkspace);
+        if ([LS respondsToSelector:def]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id ws = [LS performSelector:def];
+#pragma clang diagnostic pop
+            SEL open = sel_getUid("openSensitiveURL:withOptions:");
+            if (ws && [ws respondsToSelector:open]) {
+                NSMethodSignature *sig = [ws methodSignatureForSelector:open];
+                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                inv.target = ws;
+                inv.selector = open;
+                [inv setArgument:&u atIndex:2];
+                id opts = nil;
+                [inv setArgument:&opts atIndex:3];
+                [inv invoke];
+                return YES;
+            }
+        }
+    }
+    if ([UIApplication.sharedApplication canOpenURL:u]) {
+        [UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];
+        return YES;
+    }
+    return NO;
+}
+
 static void PuckOpenPrefs(NSArray<NSString *> *urls) {
-    UIApplication *app = UIApplication.sharedApplication;
     for (NSString *s in urls) {
-        NSURL *u = [NSURL URLWithString:s];
-        if (!u) continue;
-        [app openURL:u options:@{} completionHandler:nil];
-        return;
+        if (PuckOpenSensitive(s)) return;
     }
 }
 
@@ -107,47 +143,65 @@ static BOOL PuckAXGetBool(id obj, NSString *name, BOOL *outVal) {
     return YES;
 }
 
+static NSString *PuckHIDDump(void) {
+    NSArray *mice = GCMouse.mice;
+    if (!mice.count) return @"no HID";
+    NSMutableArray *parts = [NSMutableArray new];
+    for (GCMouse *m in mice) {
+        NSMutableArray *n = [NSMutableArray new];
+        if (m.vendorName.length) [n addObject:m.vendorName];
+        NSString *cat = m.productCategory;
+        if (cat.length && ![n containsObject:cat]) [n addObject:cat];
+        [parts addObject:n.count ? [n componentsJoinedByString:@"/"] : @"?"];
+    }
+    return [NSString stringWithFormat:@"%lu %@", (unsigned long)mice.count, [parts componentsJoinedByString:@" + "]];
+}
+
 static NSString *PuckEnableIPhonePointer(void) {
     id ax = PuckAXSettings();
-    PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
-    PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", YES);
-    PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
+    /* Release HID from AssistiveTouch — do not claim hardware. */
+    PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", NO);
     PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
     PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
     PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
     PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
+    for (NSString *sel in @[
+        @"setAssistiveTouchPerformTouchGesturesEnabled:",
+        @"setPerformTouchGesturesEnabled:",
+        @"setAssistiveTouchTouchGesturesEnabled:",
+        @"setTouchGesturesEnabled:"
+    ]) PuckAXSet(ax, sel, NO);
     notify_post("com.apple.accessibility.cache.assistivetouch");
-    notify_post("com.apple.accessibility.AssistiveTouch.enabled");
+    notify_post("com.apple.pointerui.reset");
 
-    BOOL hid = (GCMouse.current != nil) || (GCMouse.mice.count > 0);
     BOOL running = UIAccessibilityIsAssistiveTouchRunning();
-    BOOL en = NO, menu = YES, hw = NO, nub = NO;
+    BOOL en = NO, menu = YES, hw = YES;
     PuckAXGetBool(ax, @"assistiveTouchEnabled", &en);
     PuckAXGetBool(ax, @"assistiveTouchAlwaysShowMenuEnabled", &menu);
     PuckAXGetBool(ax, @"assistiveTouchHardwareEnabled", &hw);
-    PuckAXGetBool(ax, @"assistiveTouchInternalOnlyHiddenNubbitModeEnabled", &nub);
 
     NSMutableArray *hit = [NSMutableArray new];
-    [hit addObject:hid ? @"HID" : @"no mouse"];
-    [hit addObject:[NSString stringWithFormat:@"AT %@", running || en ? @"on" : @"off"]];
+    [hit addObject:PuckHIDDump()];
+    [hit addObject:[NSString stringWithFormat:@"AT-run %@", running ? @"YES" : @"NO"]];
+    [hit addObject:[NSString stringWithFormat:@"hw %@", hw ? @"claimed" : @"free"]];
     [hit addObject:[NSString stringWithFormat:@"menu %@", menu ? @"shown" : @"hidden"]];
-    if (nub) [hit addObject:@"nubbit hidden"];
-    if (hw) [hit addObject:@"hardware"];
-    if (!running && !en) [hit addObject:@"open Always Show Menu"];
     return [hit componentsJoinedByString:@" · "];
+}
+
+static NSArray<NSString *> *PuckAssistiveTouchURLs(void) {
+    return @[
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/IdleOpacity",
+        @"prefs:root=ACCESSIBILITY#TOUCH_REACHABILITY_TITLE"
+    ];
 }
 
 static NSArray<NSString *> *PuckPointerControlURLs(void) {
     return @[
-        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
-        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
-        @"App-prefs:root=General&path=TRACKPAD",
+        @"prefs:root=General&path=POINTERS",
         @"prefs:root=General&path=TRACKPAD",
-        @"App-prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
-        @"prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
-        @"App-prefs:root=ACCESSIBILITY"
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
+        @"prefs:root=ACCESSIBILITY"
     ];
 }
 
@@ -448,15 +502,15 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *sys = [self mintBtn:@"Hide AT button" action:@selector(systemPointer)];
+    UIButton *sys = [self mintBtn:@"Release HID" action:@selector(systemPointer)];
     sys.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:sys];
-    UIButton *pc = [self mintBtn:@"Pointer Control" action:@selector(openPointerControl) ghost:YES];
+    UIButton *pc = [self mintBtn:@"AssistiveTouch" action:@selector(openPointerControl) ghost:YES];
     pc.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:pc];
 
     _sysNote = [UILabel new];
-    _sysNote.text = @"AT on + Always Show Menu off = pointer, no button.";
+    _sysNote.text = @"Release HID keeps USB name. AssistiveTouch opens the real page.";
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     _sysNote.numberOfLines = 2;
@@ -629,7 +683,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)refreshDevice {
     GCMouse *m = GCMouse.current ?: GCMouse.mice.firstObject;
     if (m) {
-        _device.text = m.vendorName.length ? m.vendorName : @"Mouse";
+        _device.text = PuckHIDDump();
         _device.textColor = Mint();
         _status.text = @"Pointer live";
         _cursor.hidden = !_shown;
@@ -762,13 +816,10 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     NSString *ok = PuckEnableIPhonePointer();
     _sysNote.text = ok;
     _status.text = ok;
-    if ([ok containsString:@"AT off"] || [ok containsString:@"menu shown"]) {
-        PuckOpenPrefs(PuckPointerControlURLs());
-    }
+    [self refreshDevice];
 }
 - (void)openPointerControl {
-    [self systemPointer];
-    PuckOpenPrefs(PuckPointerControlURLs());
+    PuckOpenPrefs(PuckAssistiveTouchURLs());
 }
 @end
 
