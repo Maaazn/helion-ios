@@ -255,9 +255,7 @@ extern char **environ;
     [s appendString:@"Helion\n\n"];
     [s appendFormat:@"qemu-system-x86_64: %@\n", [HelionQEMU hasX86] ? @"YES" : @"NO"];
     [s appendFormat:@"qemu-system-aarch64: %@\n", [HelionQEMU hasARM] ? @"YES" : @"NO"];
-    [s appendFormat:@"ISO: %@\n\n", [HelionStore isoPresent] ? [HelionStore isoPath].lastPathComponent : @"none — Add ISO"];
-    [s appendString:[HelionQEMU version]];
-    [s appendString:@"\nTCG, 768 MB, serial. Attach StikDebug for JIT.\n"];
+    [s appendFormat:@"ISO: %@\n", [HelionStore isoPresent] ? [HelionStore isoPath].lastPathComponent : @"none — Add ISO"];
     _log.text = s;
 }
 - (void)append:(NSString *)t {
