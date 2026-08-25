@@ -16,58 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache UTM QEMU x86 stack
-        id: qemu-cache
-        uses: actions/cache@v4
-        with:
-          path: .qemu-ios
-          key: utm-qemu-4.7.5-x86-v1
-
-      - name: Vendor UTM iOS QEMU (x86_64 + deps + EDK2)
-        if: steps.qemu-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 15
-        run: |
-          set -euo pipefail
-          curl -L --fail -o "$RUNNER_TEMP/UTM.ipa" \
-            https://github.com/utmapp/UTM/releases/download/v4.7.5/UTM.ipa
-          mkdir -p "$RUNNER_TEMP/utm"
-          unzip -q "$RUNNER_TEMP/UTM.ipa" -d "$RUNNER_TEMP/utm"
-          python3 "$GITHUB_WORKSPACE/scripts/vendor-utm-qemu.py" \
-            "$RUNNER_TEMP/utm/Payload/UTM.app" \
-            "$GITHUB_WORKSPACE/.qemu-ios"
-          ls -lh "$GITHUB_WORKSPACE/.qemu-ios/Frameworks" | head
-          ls -lh "$GITHUB_WORKSPACE/.qemu-ios/bios"
-
-      - name: Prove QEMU binaries
-        run: |
-          set -euo pipefail
-          chmod +x scripts/prove.sh
-          scripts/prove.sh "$GITHUB_WORKSPACE/.qemu-ios" "" "$RUNNER_TEMP/PROOF-qemu.txt"
-          cat "$RUNNER_TEMP/PROOF-qemu.txt"
-
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.5.1"
-          QEMU_DIR: ${{ github.workspace }}/.qemu-ios
+          HELION_VERSION: "0.1.0"
         run: |
           set -euo pipefail
-          chmod +x scripts/build-ipa.sh
+          chmod +x scripts/build-ipa.sh scripts/prove.sh
           scripts/build-ipa.sh
 
-      - name: Prove app contains engine
+      - name: Prove
         run: |
           set -euo pipefail
           APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
-          scripts/prove.sh "$GITHUB_WORKSPACE/.qemu-ios" "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
+          scripts/prove.sh "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
           cat "$GITHUB_WORKSPACE/PROOF.txt"
           grep -q "PROOF_OK all" "$GITHUB_WORKSPACE/PROOF.txt"
-
-      - name: Upload proof
-        uses: actions/upload-artifact@v4
-        with:
-          name: helion-proof
-          path: PROOF.txt
-          if-no-files-found: error
 
       - name: Import p12 and codesign
         env:
@@ -93,19 +56,6 @@ jobs:
           echo "identity=$IDENT"
           APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
           ENT="$GITHUB_WORKSPACE/app/Helion.entitlements"
-          test -f "$GITHUB_WORKSPACE/PROOF.txt"
-          grep -q "PROOF_OK all" "$GITHUB_WORKSPACE/PROOF.txt"
-          if [[ -f "$APP/qemu-system-aarch64" ]]; then
-            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-aarch64"
-          fi
-          if [[ -f "$APP/qemu-system-x86_64" ]]; then
-            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-x86_64"
-          fi
-          for fw in "$APP"/Frameworks/*/*; do
-            [[ -f "$fw" && -x "$fw" ]] || continue
-            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$fw" || \
-            codesign --force --sign "$IDENT" --timestamp=none "$fw"
-          done
           codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP"
           mkdir -p dist
           rm -f dist/Helion.ipa
@@ -115,10 +65,10 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.1
-          name: Helion 1.5.1
+          tag_name: v0.1.0
+          name: Helion 0.1.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            1.5.1 — code fixes.
+            code fixes.

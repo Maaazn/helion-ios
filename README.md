@@ -1,5 +1,7 @@
 # Helion
 
-Sideload IPA for iPhone.
+Nintendo Switch emulator for iPhone. Original host. Not MeloNX. Not affiliated with Nintendo.
 
-License: GPL-2.0. See LICENSE and NOTICE.md.
+Bring your own dumps from hardware you own. No keys, firmware, or games are included.
+
+JIT: StikDebug / SideStore.

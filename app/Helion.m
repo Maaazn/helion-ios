@@ -1,19 +1,10 @@
-// Helion 1.5.0 — UTM-built QEMU x86_64 in-process. Windows & macOS.
+// Helion — original iOS Switch emulator host. NCE + Metal.
+// Not MeloNX. Not Nintendo. User-supplied dumps only.
 #import <UIKit/UIKit.h>
+#import <MetalKit/MetalKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-#import <dlfcn.h>
-#import <sys/socket.h>
-#import <netinet/in.h>
-#import <arpa/inet.h>
-#import <fcntl.h>
-#import <unistd.h>
-#import <errno.h>
-#import <string.h>
-#import <sys/stat.h>
-#import <pthread.h>
-#import <stdio.h>
-
-extern char **environ;
+#import <GameController/GameController.h>
+#import "nce.h"
 
 static UIColor *HNavy(void)  { return [UIColor colorWithRed:0.04 green:0.05 blue:0.09 alpha:1]; }
 static UIColor *HCard(void)  { return [UIColor colorWithRed:0.09 green:0.11 blue:0.17 alpha:1]; }
@@ -21,537 +12,177 @@ static UIColor *HCopper(void){ return [UIColor colorWithRed:0.93 green:0.68 blue
 static UIColor *HIce(void)   { return [UIColor colorWithRed:0.32 green:0.86 blue:0.88 alpha:1]; }
 static UIColor *HMuted(void) { return [UIColor colorWithWhite:0.55 alpha:1]; }
 
-static void HLog(NSString *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:ap];
-    va_end(ap);
-    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
-    NSString *path = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
-                       stringByAppendingPathComponent:@"Helion"] stringByAppendingPathComponent:@"qemu.log"];
-    NSFileHandle *h = [NSFileHandle fileHandleForWritingAtPath:path];
-    if (!h) {
-        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        h = [NSFileHandle fileHandleForWritingAtPath:path];
-    }
-    [h seekToEndOfFile];
-    [h writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-    [h closeFile];
-    NSLog(@"[Helion] %@", msg);
-}
-
 #pragma mark - Store
 
 @interface HelionStore : NSObject
 + (NSString *)root;
-+ (NSString *)isoPath:(NSString *)kind;
-+ (BOOL)hasISO:(NSString *)kind;
-+ (BOOL)installISO:(NSURL *)url kind:(NSString *)kind error:(NSError **)error;
-+ (NSString *)diskPath:(NSString *)kind;
-+ (void)ensureDisk:(NSString *)kind;
-+ (NSString *)logPath;
++ (NSString *)keysPath;
++ (BOOL)hasKeys;
++ (NSArray<NSString *> *)games; // paths
++ (BOOL)importURL:(NSURL *)url error:(NSError **)error;
 @end
 @implementation HelionStore
 + (NSString *)root {
     NSString *d = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
                    stringByAppendingPathComponent:@"Helion"];
     [[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+    [[NSFileManager defaultManager] createDirectoryAtPath:[d stringByAppendingPathComponent:@"games"] withIntermediateDirectories:YES attributes:nil error:nil];
     return d;
 }
-+ (NSString *)isoPath:(NSString *)kind {
-    return [[self root] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.iso", kind]];
++ (NSString *)keysPath { return [[self root] stringByAppendingPathComponent:@"prod.keys"]; }
++ (BOOL)hasKeys {
+    NSNumber *n = [[NSFileManager defaultManager] attributesOfItemAtPath:[self keysPath] error:nil][NSFileSize];
+    return n.unsignedLongLongValue > 32;
 }
-+ (BOOL)hasISO:(NSString *)kind {
-    NSNumber *n = [[NSFileManager defaultManager] attributesOfItemAtPath:[self isoPath:kind] error:nil][NSFileSize];
-    return n.unsignedLongLongValue > (8ull << 20);
++ (NSArray<NSString *> *)games {
+    NSString *g = [[self root] stringByAppendingPathComponent:@"games"];
+    NSArray *all = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:g error:nil] ?: @[];
+    NSMutableArray *o = [NSMutableArray array];
+    for (NSString *n in all) {
+        NSString *e = n.pathExtension.lowercaseString;
+        if ([e isEqual:@"nro"] || [e isEqual:@"nsp"] || [e isEqual:@"xci"] || [e isEqual:@"nso"])
+            [o addObject:[g stringByAppendingPathComponent:n]];
+    }
+    return o;
 }
-+ (BOOL)installISO:(NSURL *)url kind:(NSString *)kind error:(NSError **)error {
-    NSURL *dest = [NSURL fileURLWithPath:[self isoPath:kind]];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    [fm removeItemAtURL:dest error:nil];
++ (BOOL)importURL:(NSURL *)url error:(NSError **)error {
     BOOL acc = [url startAccessingSecurityScopedResource];
-    BOOL ok = [fm linkItemAtURL:url toURL:dest error:error];
-    if (!ok) { if (error) *error = nil; ok = [fm copyItemAtURL:url toURL:dest error:error]; }
+    NSString *name = url.lastPathComponent;
+    NSString *ext = name.pathExtension.lowercaseString;
+    NSString *dest;
+    if ([ext isEqual:@"keys"] || [name.lowercaseString containsString:@"prod.keys"] || [name isEqualToString:@"prod.keys"])
+        dest = [self keysPath];
+    else
+        dest = [[[self root] stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:name];
+    [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+    BOOL ok = [[NSFileManager defaultManager] copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:error];
     if (acc) [url stopAccessingSecurityScopedResource];
     return ok;
 }
-+ (NSString *)diskPath:(NSString *)kind {
-    return [[self root] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.img", kind]];
-}
-+ (void)ensureDisk:(NSString *)kind {
-    NSString *p = [self diskPath:kind];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:p]) return;
-    int fd = open(p.fileSystemRepresentation, O_RDWR | O_CREAT, 0644);
-    if (fd >= 0) { ftruncate(fd, 8ull << 30); close(fd); } // 8GB sparse
-}
-+ (NSString *)logPath {
-    return [[self root] stringByAppendingPathComponent:@"qemu.log"];
-}
 @end
 
-#pragma mark - Engine
+#pragma mark - Screen
 
-@interface HelionEngine : NSObject
-+ (NSString *)libX86;
-+ (BOOL)ready;
-+ (NSString *)status;
-- (NSString *)startKind:(NSString *)kind onLog:(void (^)(NSString *))log;
-- (void)stop;
-@property(atomic) BOOL running;
+@interface HelionMetal : MTKView
+@property (nonatomic) HelionNCE *nce;
 @end
-@implementation HelionEngine {
-    void *_dl;
-    pthread_t _thr;
+@implementation HelionMetal {
+    id<MTLCommandQueue> _q;
+    id<MTLTexture> _tex;
 }
-static HelionEngine *GEng;
-
-struct HelionQRun {
-    int argc;
-    char **argv;
-    char **envp;
-    int (*qinit)(int, char **, char **);
-    void (*qloop)(void);
-    int (*qmain)(int, char **);
-    char logpath[1024];
-    char cwd[1024];
-    char tmpdir[1024];
-    char home[1024];
-};
-
-static void *HelionQemuPthread(void *arg) {
-    struct HelionQRun *r = arg;
-    int fd = open(r->logpath, O_WRONLY | O_APPEND | O_CREAT, 0644);
-    if (fd >= 0) {
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
-        if (fd > 2) close(fd);
-    }
-    if (r->cwd[0]) chdir(r->cwd);
-    setenv("TMPDIR", r->tmpdir, 1);
-    setenv("HOME", r->home, 1);
-    fprintf(stderr, "[qemu-thread] cwd=%s tmp=%s\n", r->cwd, r->tmpdir);
-    fflush(stderr);
-    if (r->qinit) {
-        fprintf(stderr, "[qemu-thread] qemu_init argc=%d\n", r->argc);
-        fflush(stderr);
-        int rc = r->qinit(r->argc, (char **)r->argv, r->envp);
-        fprintf(stderr, "[qemu-thread] qemu_init rc=%d\n", rc);
-        fflush(stderr);
-        if (rc == 0 && r->qloop) {
-            fprintf(stderr, "[qemu-thread] qemu_main_loop\n");
-            fflush(stderr);
-            r->qloop();
-        }
-    } else if (r->qmain) {
-        r->qmain(r->argc, (char **)r->argv);
-    }
-    fprintf(stderr, "[qemu-thread] exit\n");
-    fflush(stderr);
-    if (GEng) GEng.running = NO;
-    return NULL;
-}
-+ (instancetype)shared {
-    static dispatch_once_t o;
-    dispatch_once(&o, ^{ GEng = [HelionEngine new]; });
-    return GEng;
-}
-+ (NSString *)libX86 {
-    return [[[NSBundle mainBundle] bundlePath]
-        stringByAppendingPathComponent:@"Frameworks/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu"];
-}
-+ (NSString *)bios:(NSString *)name {
-    return [[[[NSBundle mainBundle] bundlePath]
-        stringByAppendingPathComponent:@"qemu"] stringByAppendingPathComponent:name];
-}
-+ (unsigned long long)sz:(NSString *)p {
-    return [[[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil][NSFileSize] unsignedLongLongValue];
-}
-+ (BOOL)ready {
-    return [self sz:[self libX86]] > 1000000ull;
-}
-+ (NSString *)status {
-    unsigned long long xs = [self sz:[self libX86]];
-    unsigned long long bios = [self sz:[self bios:@"bios.bin"]];
-    unsigned long long vga = [self sz:[self bios:@"vgabios-stdvga.bin"]];
-    return [NSString stringWithFormat:@"framework %llu\nbios.bin %llu  vga %llu", xs, bios, vga];
-}
-- (NSArray *)argvFor:(NSString *)kind {
-    [HelionStore ensureDisk:kind];
-
-    // MINIMAL argv — strip everything that can hang init
-    NSString *biosDir = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"qemu"];
-    // Same shape UTM uses on iPhone: SeaBIOS + pc + small RAM + VNC.
-    NSMutableArray *a = [NSMutableArray arrayWithObjects:
-        @"qemu-x86_64-softmmu",
-        @"-L", biosDir,
-        @"-machine", @"pc",
-        @"-cpu", @"qemu64",
-        @"-accel", @"tcg",
-        @"-m", @"512",
-        @"-smp", @"1",
-        @"-display", @"vnc=127.0.0.1:0",
-        @"-vga", @"std",
-        @"-boot", @"order=c",
-        nil];
-    // SeaBIOS only — skip pflash so qemu_init is fast (UTM still uses EDK2 later).
-    if ([kind isEqualToString:@"mac"]) {
-        NSString *oc = [[[[NSBundle mainBundle] bundlePath]
-            stringByAppendingPathComponent:@"OSX-KVM"] stringByAppendingPathComponent:@"OpenCore.qcow2"];
-        if ([[NSFileManager defaultManager] fileExistsAtPath:oc]) {
-            [a addObject:@"-drive"];
-            [a addObject:[NSString stringWithFormat:@"if=ide,format=qcow2,file=%@", oc]];
-        }
-    }
-
-    if ([HelionStore hasISO:kind]) {
-        [a addObject:@"-cdrom"];
-        [a addObject:[HelionStore isoPath:kind]];
-        // boot from CD first when ISO present
-        for (NSUInteger i = 0; i < a.count; i++) {
-            if ([a[i] isEqualToString:@"order=c"]) a[i] = @"order=d";
-        }
-    }
-    [a addObject:@"-drive"];
-    [a addObject:[NSString stringWithFormat:@"if=ide,format=raw,file=%@", [HelionStore diskPath:kind]]];
-    return a;
-}
-- (NSString *)startKind:(NSString *)kind onLog:(void (^)(NSString *))log {
-    if (self.running) return @"Already running";
-
-    // reset log
-    [@"" writeToFile:[HelionStore logPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    HLog(@"=== Helion 1.5.1 ===");
-    HLog(@"kind=%@", kind);
-
-    NSArray *args = [self argvFor:kind];
-    HLog(@"argv count=%lu", (unsigned long)args.count);
-    for (NSString *s in args) HLog(@"  arg: %@", s);
-
-    if (log) log(@"Loading QEMU dylib…");
-
-    NSString *lib = [HelionEngine libX86];
-    unsigned long long libsz = [HelionEngine sz:lib];
-    HLog(@"dylib path=%@ size=%llu", lib, libsz);
-    if (libsz < 1000000ull) {
-        HLog(@"FATAL: dylib missing or too small");
-        return @"QEMU dylib missing";
-    }
-
-    _dl = dlopen(lib.fileSystemRepresentation, RTLD_LOCAL);
-    if (!_dl) {
-        const char *e = dlerror();
-        HLog(@"dlopen FAILED: %s", e ? e : "?");
-        return [NSString stringWithFormat:@"dlopen failed: %s", e ? e : "unknown"];
-    }
-    HLog(@"dlopen OK");
-
-    int (*qinit)(int, char **, char **) = dlsym(_dl, "qemu_init");
-    void (*qloop)(void) = dlsym(_dl, "qemu_main_loop");
-    int (*qmain)(int, char **) = dlsym(_dl, "main");
-    HLog(@"symbols: qemu_init=%p qemu_main_loop=%p main=%p", qinit, qloop, qmain);
-
-    if (!qinit && !qmain) {
-        HLog(@"FATAL: no entry symbol");
-        return @"No qemu_init/main in dylib";
-    }
-
-    int argc = (int)args.count;
-    char **argv = calloc((size_t)argc + 1, sizeof(char *));
-    for (int i = 0; i < argc; i++) argv[i] = strdup([args[i] UTF8String]);
-
-    self.running = YES;
-    if (log) log(@"Calling qemu_init…");
-
-    NSString *home = NSHomeDirectory();
-    NSString *tmp = NSTemporaryDirectory();
-    NSString *biosDir = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"qemu"];
-
-    NSArray *envLines = @[
-        [NSString stringWithFormat:@"TMPDIR=%@", tmp],
-        [NSString stringWithFormat:@"HOME=%@", home],
-        [NSString stringWithFormat:@"XDG_CACHE_HOME=%@", home],
-        @"G_MESSAGES_DEBUG=all",
-    ];
-    char **envp = calloc(envLines.count + 1, sizeof(char *));
-    for (NSUInteger i = 0; i < envLines.count; i++) envp[i] = strdup([envLines[i] UTF8String]);
-
-    struct HelionQRun *run = calloc(1, sizeof(*run));
-    run->argc = argc;
-    run->argv = argv;
-    run->envp = envp;
-    run->qinit = qinit;
-    run->qloop = qloop;
-    run->qmain = qmain;
-    strncpy(run->logpath, [HelionStore logPath].fileSystemRepresentation, 1023);
-    strncpy(run->cwd, biosDir.fileSystemRepresentation, 1023);
-    strncpy(run->tmpdir, tmp.fileSystemRepresentation, 1023);
-    strncpy(run->home, home.fileSystemRepresentation, 1023);
-
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 16u << 20);
-    pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
-    int prc = pthread_create(&_thr, &attr, HelionQemuPthread, run);
-    pthread_attr_destroy(&attr);
-    if (prc != 0) {
-        HLog(@"pthread_create failed %d", prc);
-        self.running = NO;
-        return [NSString stringWithFormat:@"pthread_create %d", prc];
-    }
-    pthread_detach(_thr);
-    return nil;
-}
-- (void)stop {
-    self.running = NO;
-}
-@end
-
-#pragma mark - VNC (interim)
-
-@interface HelionScreen : UIView
-@property (nonatomic, copy) void (^onStatus)(NSString *msg);
-- (void)connectLoop;
-- (void)disconnect;
-@end
-@implementation HelionScreen {
-    int _fd; int _w, _h;
-    NSMutableData *_fb; CALayer *_img;
-    BOOL _run, _connected;
-}
-- (instancetype)init {
-    self = [super initWithFrame:CGRectZero];
-    self.backgroundColor = UIColor.blackColor;
-    self.layer.cornerRadius = 12;
+- (instancetype)initWithNCE:(HelionNCE *)nce {
+    id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
+    self = [super initWithFrame:CGRectZero device:dev];
+    self.nce = nce;
+    self.framebufferOnly = NO;
+    self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    self.preferredFramesPerSecond = 120;
+    _q = [dev newCommandQueue];
+    MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                 width:HELION_FB_W height:HELION_FB_H mipmapped:NO];
+    d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
+    _tex = [dev newTextureWithDescriptor:d];
+    self.drawableSize = CGSizeMake(HELION_FB_W, HELION_FB_H);
+    self.enableSetNeedsDisplay = NO;
+    self.paused = NO;
+    self.layer.cornerRadius = 16;
     self.clipsToBounds = YES;
-    _img = [CALayer layer];
-    _img.contentsGravity = kCAGravityResizeAspect;
-    [self.layer addSublayer:_img];
-    [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tap:)]];
     return self;
 }
-- (void)layoutSubviews { [super layoutSubviews]; _img.frame = self.bounds; }
-- (void)disconnect { _run = NO; _connected = NO; if (_fd > 0) { close(_fd); _fd = -1; } }
-- (void)connectLoop {
-    _run = YES; _connected = NO;
-    if (self.onStatus) self.onStatus(@"Waiting for VNC…");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        for (int i = 0; i < 120 && self->_run; i++) {
-            if ([self tryConnect]) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (self.onStatus) self.onStatus(@"Connected");
-                });
-                return;
-            }
-            usleep(500000);
-        }
-        if (self->_run && self.onStatus)
-            dispatch_async(dispatch_get_main_queue(), ^{ self.onStatus(@"No VNC — see log"); });
-    });
-}
-- (BOOL)readn:(void *)b n:(int)n {
-    uint8_t *p = b; int g = 0;
-    while (g < n && _fd >= 0) {
-        ssize_t r = recv(_fd, p + g, (size_t)(n - g), 0);
-        if (r <= 0) return NO;
-        g += (int)r;
+- (void)drawRect:(CGRect)r {
+    [super drawRect:r];
+    uint32_t *fb = helion_nce_fb(self.nce);
+    if (!fb || !_tex) return;
+    MTLRegion reg = MTLRegionMake2D(0, 0, HELION_FB_W, HELION_FB_H);
+    [_tex replaceRegion:reg mipmapLevel:0 withBytes:fb bytesPerRow:HELION_FB_W * 4];
+    id<MTLCommandBuffer> cb = [_q commandBuffer];
+    MTLRenderPassDescriptor *p = self.currentRenderPassDescriptor;
+    if (!p) return;
+    p.colorAttachments[0].loadAction = MTLLoadActionClear;
+    p.colorAttachments[0].clearColor = MTLClearColorMake(0.02, 0.03, 0.05, 1);
+    id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:p];
+    /* blit via encoder isn't blit — use blit encoder */
+    [e endEncoding];
+    id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
+    id<MTLTexture> dst = self.currentDrawable.texture;
+    if (dst) {
+        MTLOrigin o = {0,0,0};
+        NSUInteger w = MIN((NSUInteger)HELION_FB_W, dst.width);
+        NSUInteger h = MIN((NSUInteger)HELION_FB_H, dst.height);
+        [b copyFromTexture:_tex sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(w, h, 1)
+                 toTexture:dst destinationSlice:0 destinationLevel:0 destinationOrigin:o];
     }
-    return YES;
-}
-- (BOOL)tryConnect {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return NO;
-    struct sockaddr_in a = {0};
-    a.sin_family = AF_INET;
-    a.sin_port = htons(5900);
-    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
-    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) { close(fd); return NO; }
-    _fd = fd;
-    char ver[12];
-    if (![self readn:ver n:12]) { close(fd); _fd = -1; return NO; }
-    send(fd, "RFB 003.008\n", 12, 0);
-    uint8_t nsec = 0;
-    if (![self readn:&nsec n:1]) { close(fd); _fd = -1; return NO; }
-    if (nsec > 0 && nsec < 32) { uint8_t t[32]={0}; [self readn:t n:nsec]; }
-    uint8_t none = 1; send(fd, &none, 1, 0);
-    uint8_t res[4]; if (![self readn:res n:4]) { close(fd); _fd = -1; return NO; }
-    uint8_t shared = 1; send(fd, &shared, 1, 0);
-    uint8_t si[24]; if (![self readn:si n:24]) { close(fd); _fd = -1; return NO; }
-    _w = (si[0]<<8)|si[1]; _h = (si[2]<<8)|si[3];
-    if (_w < 16 || _h < 16 || _w > 4096 || _h > 4096) { close(fd); _fd = -1; return NO; }
-    uint32_t nlen = ((uint32_t)si[20]<<24)|((uint32_t)si[21]<<16)|((uint32_t)si[22]<<8)|si[23];
-    if (nlen > 0 && nlen < 4096) { char name[4096]; [self readn:name n:(int)nlen]; }
-    uint8_t pf[16] = {32,24,0,1, 0,255,0,255,0,255, 16,8,0,0,0,0};
-    uint8_t spf[20]={0}; memcpy(spf+4, pf, 16); send(fd, spf, 20, 0);
-    uint8_t se[8]={2,0,0,1,0,0,0,0}; send(fd, se, 8, 0);
-    _connected = YES;
-    [self requestFull];
-    while (_run && _fd >= 0) {
-        uint8_t t=0; if (![self readn:&t n:1]) break;
-        if (t==0) [self fbUpdate];
-        else if (t==1) { uint8_t d[5]; [self readn:d n:5]; }
-        else if (t==2) { uint8_t d[1]; [self readn:d n:1]; uint16_t nc; [self readn:&nc n:2]; nc=ntohs(nc); if (nc&&nc<256){uint8_t s[6*nc];[self readn:s n:6*nc];} }
-        else if (t==3) { uint8_t d[9]; [self readn:d n:9]; }
-        else break;
-    }
-    _connected = NO;
-    return YES;
-}
-- (void)requestFull {
-    if (_fd < 0 || _w <= 0) return;
-    uint8_t r[10] = {3,0, 0,0,0,0, (uint8_t)(_w>>8),(uint8_t)_w, (uint8_t)(_h>>8),(uint8_t)_h};
-    send(_fd, r, 10, 0);
-}
-- (void)fbUpdate {
-    uint8_t pad; if (![self readn:&pad n:1]) return;
-    uint8_t nbuf[2]; if (![self readn:nbuf n:2]) return;
-    int n = (nbuf[0]<<8)|nbuf[1]; if (n<=0||n>64) return;
-    if (!_fb || _fb.length != (NSUInteger)_w*(NSUInteger)_h*4)
-        _fb = [NSMutableData dataWithLength:(NSUInteger)_w*(NSUInteger)_h*4];
-    uint8_t *pix = _fb.mutableBytes;
-    for (int i=0;i<n;i++) {
-        uint8_t rh[12]; if (![self readn:rh n:12]) return;
-        int x=(rh[0]<<8)|rh[1], y=(rh[2]<<8)|rh[3], w=(rh[4]<<8)|rh[5], h=(rh[6]<<8)|rh[7];
-        int enc=(rh[8]<<24)|(rh[9]<<16)|(rh[10]<<8)|rh[11];
-        if (enc!=0||w<=0||h<=0||x+w>_w||y+h>_h) return;
-        NSUInteger bytes=(NSUInteger)w*(NSUInteger)h*4;
-        NSMutableData *rect=[NSMutableData dataWithLength:bytes];
-        if (![self readn:rect.mutableBytes n:(int)bytes]) return;
-        uint8_t *src=rect.mutableBytes;
-        for (int row=0;row<h;row++) memcpy(pix+((y+row)*_w+x)*4, src+row*w*4, (size_t)w*4);
-    }
-    int w=_w,h=_h; NSData *copy=[_fb copy];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        CGColorSpaceRef cs=CGColorSpaceCreateDeviceRGB();
-        CGContextRef ctx=CGBitmapContextCreate((void*)copy.bytes,(size_t)w,(size_t)h,8,(size_t)w*4,cs,kCGImageAlphaNoneSkipLast|kCGBitmapByteOrder32Little);
-        CGImageRef img=ctx?CGBitmapContextCreateImage(ctx):NULL;
-        self->_img.contents=(__bridge id)img;
-        if(img)CGImageRelease(img); if(ctx)CGContextRelease(ctx); CGColorSpaceRelease(cs);
-        [self requestFull];
-    });
-}
-- (void)tap:(UITapGestureRecognizer *)g {
-    if (_fd<0||_w<=0||!_connected) return;
-    CGPoint p=[g locationInView:self];
-    int x=(int)(p.x/MAX(self.bounds.size.width,1)*_w);
-    int y=(int)(p.y/MAX(self.bounds.size.height,1)*_h);
-    x=MAX(0,MIN(x,_w-1)); y=MAX(0,MIN(y,_h-1));
-    uint8_t m1[6]={5,1,(uint8_t)(x>>8),(uint8_t)x,(uint8_t)(y>>8),(uint8_t)y};
-    uint8_t m0[6]={5,0,(uint8_t)(x>>8),(uint8_t)x,(uint8_t)(y>>8),(uint8_t)y};
-    send(_fd,m1,6,0); usleep(30000); send(_fd,m0,6,0);
+    [b endEncoding];
+    if (self.currentDrawable) [cb presentDrawable:self.currentDrawable];
+    [cb commit];
 }
 @end
 
 #pragma mark - Session
 
 @interface HelionSession : UIViewController
-- (instancetype)initWithKind:(NSString *)kind;
+- (instancetype)initWithPath:(NSString *)path probe:(BOOL)probe;
 @end
 @implementation HelionSession {
-    NSString *_kind; HelionScreen *_screen;
-    UILabel *_status; UIActivityIndicatorView *_spinner;
-    UITextView *_logView; UIButton *_stopBtn; NSTimer *_logTimer;
+    NSString *_path; BOOL _probe;
+    HelionNCE *_nce; HelionMetal *_metal;
+    UITextView *_log; NSTimer *_t;
 }
-- (instancetype)initWithKind:(NSString *)kind { self=[super init]; _kind=[kind copy]; return self; }
+- (instancetype)initWithPath:(NSString *)path probe:(BOOL)probe {
+    self = [super init]; _path = [path copy]; _probe = probe; return self;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = HNavy();
-    self.title = [_kind isEqualToString:@"mac"] ? @"macOS" : @"Windows";
+    self.title = _probe ? @"NCE Probe" : _path.lastPathComponent;
     self.navigationItem.hidesBackButton = YES;
-
-    _status = [UILabel new];
-    _status.textColor = HIce();
-    _status.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    _status.textAlignment = NSTextAlignmentCenter;
-    _status.numberOfLines = 2;
-    _status.text = @"Launching…";
-    _status.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_status];
-
-    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    _spinner.color = HIce();
-    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
-    [_spinner startAnimating];
-    [self.view addSubview:_spinner];
-
-    _screen = [HelionScreen new];
-    _screen.translatesAutoresizingMaskIntoConstraints = NO;
-    __weak typeof(self) weakSelf = self;
-    _screen.onStatus = ^(NSString *msg) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) s = weakSelf; if (!s) return;
-            s->_status.text = msg;
-            if ([msg hasPrefix:@"Connected"]) [s->_spinner stopAnimating];
-        });
-    };
-    [self.view addSubview:_screen];
-
-    _logView = [UITextView new];
-    _logView.editable = NO;
-    _logView.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
-    _logView.textColor = [UIColor colorWithWhite:0.8 alpha:1];
-    _logView.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
-    _logView.layer.cornerRadius = 8;
-    _logView.text = @"…\n";
-    _logView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_logView];
-
-    _stopBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_stopBtn setTitle:@"Stop" forState:UIControlStateNormal];
-    _stopBtn.tintColor = HCopper();
-    _stopBtn.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    [_stopBtn addTarget:self action:@selector(stopTapped) forControlEvents:UIControlEventTouchUpInside];
-    _stopBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_stopBtn];
-
+    _nce = helion_nce_create();
+    _metal = [[HelionMetal alloc] initWithNCE:_nce];
+    _metal.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_metal];
+    _log = [UITextView new];
+    _log.editable = NO;
+    _log.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
+    _log.textColor = [UIColor colorWithWhite:0.82 alpha:1];
+    _log.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+    _log.layer.cornerRadius = 10;
+    _log.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_log];
+    UIButton *stop = [UIButton buttonWithType:UIButtonTypeSystem];
+    [stop setTitle:@"Stop" forState:UIControlStateNormal];
+    stop.tintColor = HCopper();
+    stop.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    [stop addTarget:self action:@selector(stop) forControlEvents:UIControlEventTouchUpInside];
+    stop.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:stop];
     [NSLayoutConstraint activateConstraints:@[
-        [_status.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
-        [_status.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_status.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_spinner.topAnchor constraintEqualToAnchor:_status.bottomAnchor constant:4],
-        [_screen.topAnchor constraintEqualToAnchor:_spinner.bottomAnchor constant:8],
-        [_screen.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_screen.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
-        [_screen.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.38],
-        [_logView.topAnchor constraintEqualToAnchor:_screen.bottomAnchor constant:8],
-        [_logView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
-        [_logView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
-        [_logView.bottomAnchor constraintEqualToAnchor:_stopBtn.topAnchor constant:-12],
-        [_stopBtn.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [_stopBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12],
-        [_stopBtn.heightAnchor constraintEqualToConstant:40]
+        [_metal.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+        [_metal.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_metal.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_metal.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.48],
+        [_log.topAnchor constraintEqualToAnchor:_metal.bottomAnchor constant:10],
+        [_log.leadingAnchor constraintEqualToAnchor:_metal.leadingAnchor],
+        [_log.trailingAnchor constraintEqualToAnchor:_metal.trailingAnchor],
+        [_log.bottomAnchor constraintEqualToAnchor:stop.topAnchor constant:-10],
+        [stop.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [stop.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
+        [stop.heightAnchor constraintEqualToConstant:40]
     ]];
-
-    NSString *err = [[HelionEngine shared] startKind:_kind onLog:^(NSString *l) {
-        dispatch_async(dispatch_get_main_queue(), ^{ self->_status.text = l; });
-    }];
-    if (err) {
-        _status.text = err;
-        [_spinner stopAnimating];
-        _logView.text = err;
-    } else {
-        [_screen connectLoop];
-        _logTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(pollLog) userInfo:nil repeats:YES];
-    }
+    char err[256] = {0};
+    int rc = _probe ? helion_nce_run_probe(_nce, err, sizeof err)
+                    : helion_nce_run_nro(_nce, _path.fileSystemRepresentation, err, sizeof err);
+    _log.text = rc ? [NSString stringWithUTF8String:err] : @"NCE started";
+    _t = [NSTimer scheduledTimerWithTimeInterval:0.4 target:self selector:@selector(poll) userInfo:nil repeats:YES];
 }
-- (void)pollLog {
-    NSString *txt = [NSString stringWithContentsOfFile:[HelionStore logPath] encoding:NSUTF8StringEncoding error:nil];
-    if (txt.length) {
-        _logView.text = txt;
-        [_logView scrollRangeToVisible:NSMakeRange(txt.length - 1, 1)];
-    }
+- (void)poll {
+    _log.text = [NSString stringWithUTF8String:helion_nce_log(_nce)];
 }
-- (void)stopTapped {
-    [_logTimer invalidate]; _logTimer = nil;
-    [_screen disconnect];
-    [[HelionEngine shared] stop];
+- (void)stop {
+    [_t invalidate]; _t = nil;
+    helion_nce_stop(_nce);
     [self.navigationController popViewControllerAnimated:YES];
 }
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    [_logTimer invalidate]; _logTimer = nil;
-    [_screen disconnect];
-}
+- (void)dealloc { helion_nce_destroy(_nce); }
 @end
 
 #pragma mark - Home
@@ -559,7 +190,8 @@ static void *HelionQemuPthread(void *arg) {
 @interface HelionHome : UIViewController <UIDocumentPickerDelegate>
 @end
 @implementation HelionHome {
-    NSString *_pickKind; UILabel *_engineLabel;
+    UILabel *_jit, *_keys;
+    UIStackView *_list;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -574,127 +206,175 @@ static void *HelionQemuPthread(void *arg) {
     [self.view addSubview:mark];
 
     UILabel *sub = [UILabel new];
-    sub.text = @"Windows and macOS. You bring the ISO.";
+    sub.text = @"Switch. Your dumps. Native ARM64.";
     sub.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
     sub.textColor = [HCopper() colorWithAlphaComponent:0.9];
     sub.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:sub];
 
-    UIView *mac = [self card:@"macOS" kind:@"mac" accent:HIce()];
-    UIView *win = [self card:@"Windows" kind:@"win" accent:HCopper()];
-    mac.translatesAutoresizingMaskIntoConstraints = NO;
-    win.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:mac];
-    [self.view addSubview:win];
+    _jit = [UILabel new];
+    _jit.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    _jit.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_jit];
 
-    _engineLabel = [UILabel new];
-    _engineLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-    _engineLabel.textColor = HMuted();
-    _engineLabel.numberOfLines = 3;
-    _engineLabel.text = [HelionEngine status];
-    _engineLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_engineLabel];
+    _keys = [UILabel new];
+    _keys.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    _keys.textColor = HMuted();
+    _keys.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_keys];
 
-    UILabel *hint = [UILabel new];
-    hint.text = @"Enable JIT via StikDebug first";
-    hint.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    hint.textColor = [HIce() colorWithAlphaComponent:0.7];
-    hint.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:hint];
+    UIButton *add = [self pill:@"Add game / keys" ice:YES];
+    [add addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];
+    UIButton *probe = [self pill:@"NCE probe" ice:NO];
+    [probe addTarget:self action:@selector(runProbe) forControlEvents:UIControlEventTouchUpInside];
+    add.translatesAutoresizingMaskIntoConstraints = NO;
+    probe.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:add];
+    [self.view addSubview:probe];
+
+    UIScrollView *sc = [UIScrollView new];
+    sc.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:sc];
+    _list = [UIStackView new];
+    _list.axis = UILayoutConstraintAxisVertical;
+    _list.spacing = 12;
+    _list.translatesAutoresizingMaskIntoConstraints = NO;
+    [sc addSubview:_list];
 
     [NSLayoutConstraint activateConstraints:@[
-        [mark.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:32],
+        [mark.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:28],
         [mark.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
         [sub.topAnchor constraintEqualToAnchor:mark.bottomAnchor constant:6],
         [sub.leadingAnchor constraintEqualToAnchor:mark.leadingAnchor],
-        [mac.topAnchor constraintEqualToAnchor:sub.bottomAnchor constant:32],
-        [mac.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [mac.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [mac.heightAnchor constraintEqualToConstant:152],
-        [win.topAnchor constraintEqualToAnchor:mac.bottomAnchor constant:16],
-        [win.leadingAnchor constraintEqualToAnchor:mac.leadingAnchor],
-        [win.trailingAnchor constraintEqualToAnchor:mac.trailingAnchor],
-        [win.heightAnchor constraintEqualToConstant:152],
-        [hint.leadingAnchor constraintEqualToAnchor:mac.leadingAnchor],
-        [hint.bottomAnchor constraintEqualToAnchor:_engineLabel.topAnchor constant:-8],
-        [_engineLabel.leadingAnchor constraintEqualToAnchor:mac.leadingAnchor],
-        [_engineLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-20]
+        [_jit.topAnchor constraintEqualToAnchor:sub.bottomAnchor constant:16],
+        [_jit.leadingAnchor constraintEqualToAnchor:mark.leadingAnchor],
+        [_keys.topAnchor constraintEqualToAnchor:_jit.bottomAnchor constant:4],
+        [_keys.leadingAnchor constraintEqualToAnchor:mark.leadingAnchor],
+        [add.topAnchor constraintEqualToAnchor:_keys.bottomAnchor constant:18],
+        [add.leadingAnchor constraintEqualToAnchor:mark.leadingAnchor],
+        [add.heightAnchor constraintEqualToConstant:44],
+        [probe.centerYAnchor constraintEqualToAnchor:add.centerYAnchor],
+        [probe.leadingAnchor constraintEqualToAnchor:add.trailingAnchor constant:10],
+        [probe.heightAnchor constraintEqualToConstant:44],
+        [sc.topAnchor constraintEqualToAnchor:add.bottomAnchor constant:20],
+        [sc.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [sc.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [sc.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12],
+        [_list.topAnchor constraintEqualToAnchor:sc.topAnchor],
+        [_list.leadingAnchor constraintEqualToAnchor:sc.leadingAnchor],
+        [_list.trailingAnchor constraintEqualToAnchor:sc.trailingAnchor],
+        [_list.bottomAnchor constraintEqualToAnchor:sc.bottomAnchor],
+        [_list.widthAnchor constraintEqualToAnchor:sc.widthAnchor]
     ]];
+    [self reload];
 }
-- (UIView *)card:(NSString *)title kind:(NSString *)kind accent:(UIColor *)accent {
+- (UIButton *)pill:(NSString *)t ice:(BOOL)ice {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    [b setTitle:t forState:UIControlStateNormal];
+    b.backgroundColor = ice ? HIce() : HCopper();
+    [b setTitleColor:HNavy() forState:UIControlStateNormal];
+    b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    b.layer.cornerRadius = 14;
+    b.contentEdgeInsets = UIEdgeInsetsMake(0, 16, 0, 16);
+    return b;
+}
+- (void)viewWillAppear:(BOOL)a { [super viewWillAppear:a]; [self reload]; }
+- (void)reload {
+    BOOL jit = helion_nce_jit_ok();
+    _jit.text = jit ? @"JIT  on" : @"JIT  off — StikDebug first";
+    _jit.textColor = jit ? HIce() : HCopper();
+    _keys.text = [HelionStore hasKeys] ? @"prod.keys  ready" : @"No prod.keys  (needed for NSP/XCI)";
+    for (UIView *v in _list.arrangedSubviews) [_list removeArrangedSubview:v], [v removeFromSuperview];
+    NSArray *games = [HelionStore games];
+    if (!games.count) {
+        UILabel *e = [UILabel new];
+        e.text = @"No games yet. Add an NRO, NSP or XCI you dumped.";
+        e.textColor = HMuted();
+        e.font = [UIFont systemFontOfSize:14];
+        e.numberOfLines = 0;
+        [_list addArrangedSubview:e];
+    }
+    for (NSString *p in games) [_list addArrangedSubview:[self row:p]];
+}
+- (UIView *)row:(NSString *)path {
     UIView *v = [UIView new];
     v.backgroundColor = HCard();
-    v.layer.cornerRadius = 20;
-    v.layer.borderWidth = 1;
-    v.layer.borderColor = [accent colorWithAlphaComponent:0.35].CGColor;
+    v.layer.cornerRadius = 16;
     UILabel *t = [UILabel new];
-    t.text = title; t.font = [UIFont systemFontOfSize:24 weight:UIFontWeightSemibold]; t.textColor = UIColor.whiteColor;
-    t.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:t];
-    UILabel *iso = [UILabel new]; iso.tag = 50;
-    iso.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]; iso.textColor = HMuted();
-    iso.text = [HelionStore hasISO:kind] ? @"ISO ready" : @"No ISO — add your image";
-    iso.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:iso];
-    UIButton *add = [UIButton buttonWithType:UIButtonTypeSystem];
-    [add setTitle:@"Add ISO" forState:UIControlStateNormal]; add.tintColor = accent;
-    add.tag = [kind isEqualToString:@"mac"] ? 1 : 2;
-    [add addTarget:self action:@selector(addISO:) forControlEvents:UIControlEventTouchUpInside];
-    add.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:add];
+    t.text = path.lastPathComponent;
+    t.textColor = UIColor.whiteColor;
+    t.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    t.translatesAutoresizingMaskIntoConstraints = NO;
+    [v addSubview:t];
     UIButton *go = [UIButton buttonWithType:UIButtonTypeSystem];
     [go setTitle:@"Start" forState:UIControlStateNormal];
-    go.backgroundColor = accent; [go setTitleColor:HNavy() forState:UIControlStateNormal];
-    go.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
-    go.layer.cornerRadius = 14;
-    go.tag = [kind isEqualToString:@"mac"] ? 1 : 2;
+    go.backgroundColor = HIce();
+    [go setTitleColor:HNavy() forState:UIControlStateNormal];
+    go.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
+    go.layer.cornerRadius = 12;
+    go.accessibilityValue = path;
     [go addTarget:self action:@selector(start:) forControlEvents:UIControlEventTouchUpInside];
-    go.translatesAutoresizingMaskIntoConstraints = NO; [v addSubview:go];
+    go.translatesAutoresizingMaskIntoConstraints = NO;
+    [v addSubview:go];
     [NSLayoutConstraint activateConstraints:@[
-        [t.topAnchor constraintEqualToAnchor:v.topAnchor constant:22],
-        [t.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:20],
-        [iso.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:6],
-        [iso.leadingAnchor constraintEqualToAnchor:t.leadingAnchor],
-        [add.leadingAnchor constraintEqualToAnchor:t.leadingAnchor],
-        [add.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-18],
-        [go.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-18],
+        [v.heightAnchor constraintEqualToConstant:64],
+        [t.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:16],
+        [t.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+        [t.trailingAnchor constraintLessThanOrEqualToAnchor:go.leadingAnchor constant:-8],
+        [go.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-12],
         [go.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
-        [go.widthAnchor constraintEqualToConstant:100],
-        [go.heightAnchor constraintEqualToConstant:44]
+        [go.widthAnchor constraintEqualToConstant:84],
+        [go.heightAnchor constraintEqualToConstant:36]
     ]];
-    v.accessibilityIdentifier = kind;
     return v;
 }
-- (NSString *)kindFrom:(UIButton *)b { return b.tag == 1 ? @"mac" : @"win"; }
-- (void)addISO:(UIButton *)b {
-    _pickKind = [self kindFrom:b];
-    UTType *iso = [UTType typeWithFilenameExtension:@"iso"];
-    UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:iso ? @[iso, UTTypeData] : @[UTTypeData]];
+- (void)add {
+    NSMutableArray *types = [NSMutableArray arrayWithObject:UTTypeData];
+    for (NSString *e in @[@"nro", @"nsp", @"xci", @"nso", @"keys"]) {
+        UTType *t = [UTType typeWithFilenameExtension:e];
+        if (t) [types addObject:t];
+    }
+    UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
     p.delegate = self;
+    p.allowsMultipleSelection = YES;
     [self presentViewController:p animated:YES completion:nil];
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    [HelionStore installISO:urls.firstObject kind:_pickKind error:nil];
-    [self refreshISOLabels];
+    for (NSURL *u in urls) [HelionStore importURL:u error:nil];
+    [self reload];
 }
-- (void)refreshISOLabels {
-    for (UIView *v in self.view.subviews) {
-        UILabel *iso = [v viewWithTag:50];
-        if (![iso isKindOfClass:[UILabel class]]) continue;
-        NSString *kind = v.accessibilityIdentifier;
-        if (kind.length) iso.text = [HelionStore hasISO:kind] ? @"ISO ready" : @"No ISO — add your image";
-    }
+- (void)runProbe {
+    HelionSession *s = [[HelionSession alloc] initWithPath:nil probe:YES];
+    [self.navigationController pushViewController:s animated:YES];
 }
 - (void)start:(UIButton *)b {
-    HelionSession *s = [[HelionSession alloc] initWithKind:[self kindFrom:b]];
+    NSString *path = b.accessibilityValue;
+    NSString *ext = path.pathExtension.lowercaseString;
+    if ([ext isEqual:@"nsp"] || [ext isEqual:@"xci"]) {
+        if (![HelionStore hasKeys]) {
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"prod.keys required"
+                message:@"NSP/XCI need keys dumped from your own Switch. This app never ships keys or games."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+            return;
+        }
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"NCA loaded"
+            message:@"Keys are present. 3D GPU HLE for commercial titles is the next core drop. NRO homebrew runs now via NCE."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    HelionSession *s = [[HelionSession alloc] initWithPath:path probe:NO];
     [self.navigationController pushViewController:s animated:YES];
 }
 @end
 
 @interface HelionAppDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow *window;
 @end
 @implementation HelionAppDelegate
-- (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opt {
-    return YES;
-}
+- (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opt { return YES; }
 @end
 
 @interface HelionSceneDelegate : UIResponder <UIWindowSceneDelegate>
@@ -713,7 +393,5 @@ static void *HelionQemuPthread(void *arg) {
 @end
 
 int main(int argc, char *argv[]) {
-    @autoreleasepool {
-        return UIApplicationMain(argc, argv, nil, NSStringFromClass([HelionAppDelegate class]));
-    }
+    @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([HelionAppDelegate class])); }
 }
