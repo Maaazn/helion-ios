@@ -1,4 +1,4 @@
-// Puck 1.6.3 — release HID from AssistiveTouch; open real Settings pages.
+// Puck 1.7.0 — system pointer is AssistiveTouch on + menu hidden. Persistent.
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -11,11 +11,22 @@
 typedef NS_ENUM(NSInteger, PuckShape) { PuckShapeMac = 0, PuckShapeWin, PuckShapePuck, PuckShapeCross, PuckShapeFile };
 typedef NS_ENUM(NSInteger, PuckDesk)  { PuckDeskVoid = 0, PuckDeskGrid, PuckDeskPaper, PuckDeskPhoto };
 
+static NSString *const kPuckSystemKey = @"puck.systemPointer";
+
 static UIColor *Ink(void)   { return [UIColor colorWithRed:0.04 green:0.045 blue:0.06 alpha:1]; }
 static UIColor *Mint(void)  { return [UIColor colorWithRed:0.49 green:1.00 blue:0.80 alpha:1]; }
 static UIColor *Pearl(void) { return [UIColor colorWithRed:0.96 green:0.97 blue:0.98 alpha:1]; }
 static UIColor *Card(void)  { return [UIColor colorWithRed:0.10 green:0.11 blue:0.14 alpha:1]; }
 static UIColor *Dim(void)   { return [UIColor colorWithWhite:0.55 alpha:1]; }
+
+static BOOL PuckWantSystem(void) {
+    return [NSUserDefaults.standardUserDefaults boolForKey:kPuckSystemKey];
+}
+static void PuckSetWantSystem(BOOL on) {
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d setBool:on forKey:kPuckSystemKey];
+    [d synchronize];
+}
 
 static BOOL PuckOpenSensitive(NSString *s) {
     NSURL *u = [NSURL URLWithString:s];
@@ -92,6 +103,15 @@ static BOOL PuckAXCallC(const char *name, BOOL on) {
     return YES;
 }
 
+static BOOL PuckAXGetC(const char *name, BOOL *outVal) {
+    if (!outVal) return NO;
+    PuckLoadAX();
+    BOOL (*fn)(void) = dlsym(RTLD_DEFAULT, name);
+    if (!fn) return NO;
+    *outVal = fn();
+    return YES;
+}
+
 static BOOL PuckAXSet(id obj, NSString *name, BOOL on) {
     if (!obj) return NO;
     SEL sel = NSSelectorFromString(name);
@@ -143,6 +163,12 @@ static BOOL PuckAXGetBool(id obj, NSString *name, BOOL *outVal) {
     return YES;
 }
 
+static void PuckPrefBool(CFStringRef key, BOOL on) {
+    CFPreferencesSetValue(key, on ? kCFBooleanTrue : kCFBooleanFalse,
+                          CFSTR("com.apple.Accessibility"),
+                          kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+}
+
 static NSString *PuckHIDDump(void) {
     NSArray *mice = GCMouse.mice;
     if (!mice.count) return @"no HID";
@@ -157,51 +183,68 @@ static NSString *PuckHIDDump(void) {
     return [NSString stringWithFormat:@"%lu %@", (unsigned long)mice.count, [parts componentsJoinedByString:@" + "]];
 }
 
-static NSString *PuckEnableIPhonePointer(void) {
+/* Video proof: AT off = 1 USB mouse, no SpringBoard pointer.
+   AT on  = 2 mice (USB + AssistiveTouch virtual) and pointer on Home.
+   Hardware must stay claimed. Always Show Menu off hides the nubbit. */
+static BOOL PuckSystemLive(void) {
+    if (UIAccessibilityIsAssistiveTouchRunning()) return YES;
+    if (GCMouse.mice.count >= 2) return YES;
+    BOOL en = NO;
+    if (PuckAXGetC("AXSAssistiveTouchEnabled", &en) && en) return YES;
+    return NO;
+}
+
+static NSString *PuckApplySystemPointer(BOOL enable) {
     id ax = PuckAXSettings();
-    /* Release HID from AssistiveTouch — do not claim hardware. */
-    PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", NO);
-    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
-    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
-    PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
-    PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
-    for (NSString *sel in @[
-        @"setAssistiveTouchPerformTouchGesturesEnabled:",
-        @"setPerformTouchGesturesEnabled:",
-        @"setAssistiveTouchTouchGesturesEnabled:",
-        @"setTouchGesturesEnabled:"
-    ]) PuckAXSet(ax, sel, NO);
+    if (enable) {
+        PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
+        PuckAXCallC("AXSAssistiveTouchSetHardwareEnabled", YES);
+        PuckAXCallC("AXSAssistiveTouchSetUIEnabled", YES);
+        PuckAXCallC("AXSAssistiveTouchSetAlwaysShowMenu", NO);
+
+        PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
+        PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", YES);
+        PuckAXSet(ax, @"setAssistiveTouchUIEnabled:", YES);
+        PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
+        PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
+        PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
+        PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
+
+        PuckPrefBool(CFSTR("AssistiveTouchEnabled"), YES);
+        PuckPrefBool(CFSTR("AlwaysShowMenu"), NO);
+        PuckPrefBool(CFSTR("AssistiveTouchAlwaysShowMenu"), NO);
+        CFPreferencesSynchronize(CFSTR("com.apple.Accessibility"),
+                                 kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    }
+
     notify_post("com.apple.accessibility.cache.assistivetouch");
+    notify_post("com.apple.accessibility.cache.assistivetouch.menu");
     notify_post("com.apple.pointerui.reset");
 
     BOOL running = UIAccessibilityIsAssistiveTouchRunning();
-    BOOL en = NO, menu = YES, hw = YES;
-    PuckAXGetBool(ax, @"assistiveTouchEnabled", &en);
-    PuckAXGetBool(ax, @"assistiveTouchAlwaysShowMenuEnabled", &menu);
-    PuckAXGetBool(ax, @"assistiveTouchHardwareEnabled", &hw);
+    BOOL en = NO, menu = YES, hw = NO;
+    PuckAXGetC("AXSAssistiveTouchEnabled", &en);
+    PuckAXGetC("AXSAssistiveTouchAlwaysShowMenu", &menu);
+    PuckAXGetC("AXSAssistiveTouchHardwareEnabled", &hw);
+    if (!en) PuckAXGetBool(ax, @"assistiveTouchEnabled", &en);
+    BOOL menuGot = PuckAXGetBool(ax, @"assistiveTouchAlwaysShowMenuEnabled", &menu);
+    (void)menuGot;
+    BOOL live = PuckSystemLive();
 
     NSMutableArray *hit = [NSMutableArray new];
     [hit addObject:PuckHIDDump()];
     [hit addObject:[NSString stringWithFormat:@"AT-run %@", running ? @"YES" : @"NO"]];
-    [hit addObject:[NSString stringWithFormat:@"hw %@", hw ? @"claimed" : @"free"]];
+    [hit addObject:live ? @"system LIVE" : @"visual only"];
     [hit addObject:[NSString stringWithFormat:@"menu %@", menu ? @"shown" : @"hidden"]];
+    [hit addObject:[NSString stringWithFormat:@"hw %@", hw ? @"claimed" : @"free"]];
     return [hit componentsJoinedByString:@" · "];
 }
 
 static NSArray<NSString *> *PuckAssistiveTouchURLs(void) {
     return @[
         @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/IdleOpacity",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
         @"prefs:root=ACCESSIBILITY#TOUCH_REACHABILITY_TITLE"
-    ];
-}
-
-static NSArray<NSString *> *PuckPointerControlURLs(void) {
-    return @[
-        @"prefs:root=General&path=POINTERS",
-        @"prefs:root=General&path=TRACKPAD",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
-        @"prefs:root=ACCESSIBILITY"
     ];
 }
 
@@ -267,7 +310,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 @property (nonatomic) UIColor *accent;
 @property (nonatomic) PuckShape shape;
 @property (nonatomic, strong) UIImage *custom;
-@property (nonatomic) CGPoint tip; // 0-1
+@property (nonatomic) CGPoint tip;
 @end
 @implementation PuckCursor
 - (instancetype)initWithFrame:(CGRect)f {
@@ -346,7 +389,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     UILabel *_status;
     UILabel *_coords;
     UILabel *_device;
+    UILabel *_sub;
     UISwitch *_visible;
+    UISwitch *_system;
     UISlider *_size;
     UISlider *_speed;
     CGPoint _pos;
@@ -360,14 +405,17 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     UINotificationFeedbackGenerator *_haptic;
     id _connectObs;
     id _disconnectObs;
+    id _activeObs;
     NSArray<UIButton *> *_shapeBtns;
     NSArray<UIButton *> *_deskBtns;
     UILabel *_sysNote;
-    NSInteger _pickKind; // 0 cursor, 1 wallpaper
+    NSInteger _pickKind;
+    BOOL _askedOnce;
 }
 - (void)dealloc {
     if (_connectObs) [NSNotificationCenter.defaultCenter removeObserver:_connectObs];
     if (_disconnectObs) [NSNotificationCenter.defaultCenter removeObserver:_disconnectObs];
+    if (_activeObs) [NSNotificationCenter.defaultCenter removeObserver:_activeObs];
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -388,12 +436,11 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
-    UILabel *sub = [UILabel new];
-    sub.text = @"Your pointer. Visual only.";
-    sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    sub.textColor = Mint();
-    sub.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:sub];
+    _sub = [UILabel new];
+    _sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    _sub.textColor = Mint();
+    _sub.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_sub];
 
     _device = [UILabel new];
     _device.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
@@ -478,6 +525,19 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _visible.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_visible];
 
+    UILabel *sysL = [UILabel new];
+    sysL.text = @"System pointer";
+    sysL.textColor = Pearl();
+    sysL.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    sysL.translatesAutoresizingMaskIntoConstraints = NO;
+    [bar addSubview:sysL];
+    _system = [UISwitch new];
+    _system.on = PuckWantSystem();
+    _system.onTintColor = Mint();
+    [_system addTarget:self action:@selector(toggleSystem) forControlEvents:UIControlEventValueChanged];
+    _system.translatesAutoresizingMaskIntoConstraints = NO;
+    [bar addSubview:_system];
+
     UILabel *szL = [UILabel new];
     szL.text = @"Size"; szL.textColor = Dim();
     szL.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
@@ -502,18 +562,14 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *sys = [self mintBtn:@"Release HID" action:@selector(systemPointer)];
-    sys.translatesAutoresizingMaskIntoConstraints = NO;
-    [bar addSubview:sys];
-    UIButton *pc = [self mintBtn:@"AssistiveTouch" action:@selector(openPointerControl) ghost:YES];
+    UIButton *pc = [self mintBtn:@"Open AssistiveTouch" action:@selector(openAssistiveTouch)];
     pc.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:pc];
 
     _sysNote = [UILabel new];
-    _sysNote.text = @"Release HID keeps USB name. AssistiveTouch opens the real page.";
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-    _sysNote.numberOfLines = 2;
+    _sysNote.numberOfLines = 3;
     _sysNote.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_sysNote];
 
@@ -521,11 +577,11 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [NSLayoutConstraint activateConstraints:@[
         [title.topAnchor constraintEqualToAnchor:g.topAnchor constant:2],
         [title.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [sub.topAnchor constraintEqualToAnchor:title.bottomAnchor],
-        [sub.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+        [_sub.topAnchor constraintEqualToAnchor:title.bottomAnchor],
+        [_sub.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
         [_device.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [_device.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [_stage.topAnchor constraintEqualToAnchor:sub.bottomAnchor constant:8],
+        [_stage.topAnchor constraintEqualToAnchor:_sub.bottomAnchor constant:8],
         [_stage.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14],
         [_stage.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14],
         [_stage.bottomAnchor constraintEqualToAnchor:bar.topAnchor constant:-8],
@@ -554,7 +610,11 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [visL.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [_visible.centerYAnchor constraintEqualToAnchor:visL.centerYAnchor],
         [_visible.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
-        [szL.topAnchor constraintEqualToAnchor:visL.bottomAnchor constant:8],
+        [sysL.topAnchor constraintEqualToAnchor:visL.bottomAnchor constant:10],
+        [sysL.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
+        [_system.centerYAnchor constraintEqualToAnchor:sysL.centerYAnchor],
+        [_system.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
+        [szL.topAnchor constraintEqualToAnchor:sysL.bottomAnchor constant:8],
         [szL.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [_size.centerYAnchor constraintEqualToAnchor:szL.centerYAnchor],
         [_size.leadingAnchor constraintEqualToAnchor:szL.trailingAnchor constant:10],
@@ -564,15 +624,11 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_speed.centerYAnchor constraintEqualToAnchor:spL.centerYAnchor],
         [_speed.leadingAnchor constraintEqualToAnchor:spL.trailingAnchor constant:10],
         [_speed.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
-        [sys.topAnchor constraintEqualToAnchor:spL.bottomAnchor constant:8],
-        [sys.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
-        [sys.trailingAnchor constraintEqualToAnchor:bar.centerXAnchor constant:-4],
-        [sys.heightAnchor constraintEqualToConstant:40],
-        [pc.topAnchor constraintEqualToAnchor:sys.topAnchor],
-        [pc.leadingAnchor constraintEqualToAnchor:bar.centerXAnchor constant:4],
+        [pc.topAnchor constraintEqualToAnchor:spL.bottomAnchor constant:8],
+        [pc.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [pc.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [pc.heightAnchor constraintEqualToConstant:40],
-        [_sysNote.topAnchor constraintEqualToAnchor:sys.bottomAnchor constant:4],
+        [_sysNote.topAnchor constraintEqualToAnchor:pc.bottomAnchor constant:4],
         [_sysNote.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [_sysNote.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [_sysNote.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor]
@@ -582,13 +638,18 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _connectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself bindMouse:n.object];
         [wself refreshDevice];
-        [wself systemPointer];
+        if (PuckWantSystem()) [wself applySystem:NO];
     }];
     _disconnectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself refreshDevice];
     }];
+    _activeObs = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        [wself refreshDevice];
+        if (PuckWantSystem()) [wself applySystem:NO];
+    }];
     [self applyTip];
     [self markChips];
+    [self refreshDevice];
 }
 - (UIButton *)mintBtn:(NSString *)t action:(SEL)s {
     return [self mintBtn:t action:s ghost:NO];
@@ -650,7 +711,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
     [self refreshDevice];
-    if (GCMouse.mice.count) [self systemPointer];
+    if (PuckWantSystem()) [self applySystem:NO];
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self placeCursor]; }
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
@@ -681,16 +742,27 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     }
 }
 - (void)refreshDevice {
+    BOOL live = PuckSystemLive();
+    BOOL want = PuckWantSystem();
     GCMouse *m = GCMouse.current ?: GCMouse.mice.firstObject;
     if (m) {
         _device.text = PuckHIDDump();
         _device.textColor = Mint();
-        _status.text = @"Pointer live";
+        if (![_status.text hasPrefix:@"click"] && ![_status.text hasPrefix:@"hit"] && ![_status.text hasPrefix:@"scroll"]) {
+            _status.text = live ? @"System pointer live" : @"Pointer live";
+        }
         _cursor.hidden = !_shown;
     } else {
         _device.text = @"No mouse";
         _device.textColor = Dim();
         _status.text = @"Plug a mouse";
+    }
+    if (want && live) {
+        _sub.text = @"System pointer on. Stays on.";
+    } else if (want) {
+        _sub.text = @"System pointer: turn AssistiveTouch on once.";
+    } else {
+        _sub.text = @"Your pointer. Visual only.";
     }
 }
 - (void)hover:(UIHoverGestureRecognizer *)g {
@@ -715,7 +787,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _coords.text = [NSString stringWithFormat:@"%.0f  ×  %.0f", _pos.x, _pos.y];
     if (_shown) _cursor.hidden = NO;
     [self drip];
-    _status.text = @"Pointer live";
+    _status.text = PuckSystemLive() ? @"System pointer live" : @"Pointer live";
 }
 - (void)placeCursor {
     CGFloat z = 48 * _scale;
@@ -742,7 +814,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)click:(BOOL)p {
     _cursor.pressed = p;
     [_cursor setNeedsDisplay];
-    _status.text = p ? @"click" : @"Pointer live";
+    _status.text = p ? @"click" : (PuckSystemLive() ? @"System pointer live" : @"Pointer live");
     if (p) [_haptic notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 - (void)rightClick { _status.text = @"right click"; }
@@ -812,13 +884,36 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         _status.text = @"wallpaper loaded";
     }
 }
-- (void)systemPointer {
-    NSString *ok = PuckEnableIPhonePointer();
-    _sysNote.text = ok;
-    _status.text = ok;
-    [self refreshDevice];
+- (void)toggleSystem {
+    BOOL on = _system.on;
+    PuckSetWantSystem(on);
+    _askedOnce = NO;
+    if (on) {
+        [self applySystem:YES];
+    } else {
+        _sysNote.text = @"System pointer off. In-app only. AssistiveTouch is left as you set it.";
+        [self refreshDevice];
+    }
 }
-- (void)openPointerControl {
+- (void)applySystem:(BOOL)promptIfNeeded {
+    NSString *ok = PuckApplySystemPointer(YES);
+    _sysNote.text = ok;
+    [self refreshDevice];
+    if (!promptIfNeeded) return;
+    if (PuckSystemLive()) return;
+    if (_askedOnce) return;
+    _askedOnce = YES;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"AssistiveTouch once"
+        message:@"Turn AssistiveTouch on. Then turn Always Show Menu off. After that the pointer stays on the Home screen."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        PuckOpenPrefs(PuckAssistiveTouchURLs());
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+- (void)openAssistiveTouch {
+    if (PuckWantSystem()) [self applySystem:NO];
     PuckOpenPrefs(PuckAssistiveTouchURLs());
 }
 @end
