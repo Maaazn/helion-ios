@@ -12,6 +12,7 @@ extern char **environ;
 @interface HelionStore : NSObject
 + (NSString *)root;
 + (NSString *)isoPath;
++ (NSString *)isoHint;
 + (BOOL)isoPresent;
 + (BOOL)installISOFromURL:(NSURL *)url error:(NSError **)error;
 @end
@@ -28,10 +29,19 @@ extern char **environ;
 + (NSString *)isoPath {
     return [[self root] stringByAppendingPathComponent:@"guest.iso"];
 }
-+ (BOOL)isoPresent {
-    NSNumber *n = [[NSFileManager defaultManager]
-        attributesOfItemAtPath:[self isoPath] error:nil][NSFileSize];
-    return n.unsignedLongLongValue > (8ull << 20);
++ (NSString *)isoHint {
+    FILE *f = fopen([self isoPath].fileSystemRepresentation, "rb");
+    if (!f) return @"none";
+    char buf[32768];
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    NSData *d = [NSData dataWithBytes:buf length:n];
+    NSString *ascii = [[NSString alloc] initWithData:d encoding:NSISOLatin1StringEncoding] ?: @"";
+    if ([ascii containsString:@"EFI"] && [ascii containsString:@"BOOT"])
+        return @"uefi";
+    if (n > 0x8001 && buf[0x8001] == 'C' && buf[0x8002] == 'D')
+        return @"iso9660";
+    return @"blob";
 }
 + (BOOL)installISOFromURL:(NSURL *)url error:(NSError **)error {
     NSURL *dest = [NSURL fileURLWithPath:[self isoPath]];
@@ -119,6 +129,11 @@ extern char **environ;
 - (void)startWithLog:(void (^)(NSString *))log done:(void (^)(NSString *))done {
     [self stop];
     BOOL x86 = [HelionQEMU hasX86];
+    BOOL preferARM = [HelionQEMU hasARM] && [[HelionStore isoHint] isEqualToString:@"blob"];
+    if (preferARM && [HelionQEMU hasARM])
+        x86 = NO;
+    if (!x86 && ![HelionQEMU hasARM])
+        x86 = [HelionQEMU hasX86];
     NSString *bin = x86 ? [HelionQEMU x86] : [HelionQEMU arm];
     if (![HelionQEMU exists:bin]) { if (done) done(@"no qemu-system in IPA"); return; }
     NSMutableArray *args = [NSMutableArray arrayWithObject:bin];
@@ -237,8 +252,7 @@ extern char **environ;
 }
 - (void)banner {
     NSMutableString *s = [NSMutableString string];
-    [s appendString:@"Helion 0.1.0 — iPhone system emulator\n"];
-    [s appendString:@"Engine: QEMU (GPL-2.0). Helion is not UTM.\n\n"];
+    [s appendString:@"Helion\n\n"];
     [s appendFormat:@"qemu-system-x86_64: %@\n", [HelionQEMU hasX86] ? @"YES" : @"NO"];
     [s appendFormat:@"qemu-system-aarch64: %@\n", [HelionQEMU hasARM] ? @"YES" : @"NO"];
     [s appendFormat:@"ISO: %@\n\n", [HelionStore isoPresent] ? [HelionStore isoPath].lastPathComponent : @"none — Add ISO"];

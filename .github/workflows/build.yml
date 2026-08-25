@@ -81,7 +81,4 @@ jobs:
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            Helion 0.1.0 — original iPhone emulator host. Engine is QEMU (GPL-2.0).
-
-            Not UTM. Not Virtual Mac. Not Velora.
-            Add ISO, Start, serial console. TCG, StikDebug for JIT.
+            0.1.0 — code fixes.
