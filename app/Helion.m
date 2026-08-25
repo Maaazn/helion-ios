@@ -1,4 +1,4 @@
-// Helion 1.4.0 — QEMU as iOS framework (in-process). Windows & macOS.
+// Helion 1.5.0 — UTM-built QEMU x86_64 in-process. Windows & macOS.
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <dlfcn.h>
@@ -82,7 +82,7 @@ static void HLog(NSString *fmt, ...) {
     NSString *p = [self diskPath:kind];
     if ([[NSFileManager defaultManager] fileExistsAtPath:p]) return;
     int fd = open(p.fileSystemRepresentation, O_RDWR | O_CREAT, 0644);
-    if (fd >= 0) { ftruncate(fd, 2ull << 30); close(fd); } // 2GB sparse
+    if (fd >= 0) { ftruncate(fd, 8ull << 30); close(fd); } // 8GB sparse
 }
 + (NSString *)logPath {
     return [[self root] stringByAppendingPathComponent:@"qemu.log"];
@@ -179,11 +179,11 @@ static void *HelionQemuPthread(void *arg) {
         @"-machine", @"q35",
         @"-cpu", @"qemu64",
         @"-accel", @"tcg",
-        @"-m", @"1024",
+        @"-m", @"2048",
         @"-smp", @"2",
-        @"-display", @"vnc=127.0.0.1:0,to=0",
+        @"-display", @"vnc=127.0.0.1:0",
         @"-vga", @"std",
-        @"-serial", @"stdio",
+        @"-rtc", @"base=localtime",
         @"-usb", @"-device", @"usb-tablet",
         @"-boot", @"order=c",
         nil];
@@ -229,7 +229,7 @@ static void *HelionQemuPthread(void *arg) {
 
     // reset log
     [@"" writeToFile:[HelionStore logPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    HLog(@"=== Helion 1.4.1 ===");
+    HLog(@"=== Helion 1.5.0 ===");
     HLog(@"kind=%@", kind);
 
     NSArray *args = [self argvFor:kind];
@@ -327,7 +327,7 @@ static void *HelionQemuPthread(void *arg) {
     _run = YES; _connected = NO;
     if (self.onStatus) self.onStatus(@"Waiting for VNC…");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        for (int i = 0; i < 40 && self->_run; i++) {
+        for (int i = 0; i < 120 && self->_run; i++) {
             if ([self tryConnect]) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (self.onStatus) self.onStatus(@"Connected");

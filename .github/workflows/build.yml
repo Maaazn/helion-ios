@@ -16,27 +16,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache QEMU iphoneos
+      - name: Cache UTM QEMU x86 stack
         id: qemu-cache
         uses: actions/cache@v4
         with:
           path: .qemu-ios
-          key: qemu-ios-${{ hashFiles('scripts/build-qemu-ios.sh') }}
+          key: utm-qemu-4.7.5-x86-v1
 
-      - name: Build QEMU for iphoneos
+      - name: Vendor UTM iOS QEMU (x86_64 + deps + EDK2)
         if: steps.qemu-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 90
+        timeout-minutes: 15
         run: |
-          set -uo pipefail
-          chmod +x scripts/build-qemu-ios.sh scripts/prove.sh scripts/build-ipa.sh
-          scripts/build-qemu-ios.sh "$GITHUB_WORKSPACE/.qemu-ios"
-
-      - name: Relink QEMU dylibs
-        run: |
-          set -uo pipefail
-          chmod +x scripts/relink-qemu-dylib.sh
-          scripts/relink-qemu-dylib.sh "$GITHUB_WORKSPACE/.qemu-ios"
-          ls -lh "$GITHUB_WORKSPACE/.qemu-ios"/libqemu-system-*.dylib || true
+          set -euo pipefail
+          curl -L --fail -o "$RUNNER_TEMP/UTM.ipa" \
+            https://github.com/utmapp/UTM/releases/download/v4.7.5/UTM.ipa
+          mkdir -p "$RUNNER_TEMP/utm"
+          unzip -q "$RUNNER_TEMP/UTM.ipa" -d "$RUNNER_TEMP/utm"
+          python3 "$GITHUB_WORKSPACE/scripts/vendor-utm-qemu.py" \
+            "$RUNNER_TEMP/utm/Payload/UTM.app" \
+            "$GITHUB_WORKSPACE/.qemu-ios"
+          ls -lh "$GITHUB_WORKSPACE/.qemu-ios/Frameworks" | head
+          ls -lh "$GITHUB_WORKSPACE/.qemu-ios/bios"
 
       - name: Prove QEMU binaries
         run: |
@@ -47,7 +47,7 @@ jobs:
 
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.4.1"
+          HELION_VERSION: "1.5.0"
           QEMU_DIR: ${{ github.workspace }}/.qemu-ios
         run: |
           set -euo pipefail
@@ -101,8 +101,10 @@ jobs:
           if [[ -f "$APP/qemu-system-x86_64" ]]; then
             codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-x86_64"
           fi
-          for fw in "$APP"/Frameworks/*/qemu-*; do
-            [[ -f "$fw" ]] && codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$fw"
+          for fw in "$APP"/Frameworks/*/*; do
+            [[ -f "$fw" && -x "$fw" ]] || continue
+            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$fw" || \
+            codesign --force --sign "$IDENT" --timestamp=none "$fw"
           done
           codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP"
           mkdir -p dist
@@ -113,10 +115,10 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.1
-          name: Helion 1.4.1
+          tag_name: v1.5.0
+          name: Helion 1.5.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            1.4.1 — code fixes.
+            1.5.0 — code fixes.
