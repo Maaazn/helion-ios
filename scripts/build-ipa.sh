@@ -140,7 +140,7 @@ fi
 xcrun --sdk iphoneos clang -arch "$IDENT_ARM" -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc \
   -framework Foundation -framework UIKit -framework Metal -framework MetalKit \
-  -framework UniformTypeIdentifiers -framework QuartzCore \
+  -framework UniformTypeIdentifiers -framework QuartzCore -framework CoreGraphics \
   -rpath @executable_path/Frameworks \
   "$ROOT/host/Helion.m" -o "$APP/Helion"
 
