@@ -47,7 +47,7 @@ jobs:
 
       - name: Compile Helion.app
         env:
-          HELION_VERSION: "1.3.1"
+          HELION_VERSION: "1.4.0"
           QEMU_DIR: ${{ github.workspace }}/.qemu-ios
         run: |
           set -euo pipefail
@@ -101,8 +101,8 @@ jobs:
           if [[ -f "$APP/qemu-system-x86_64" ]]; then
             codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-x86_64"
           fi
-          for d in "$APP"/libqemu-system-*.dylib; do
-            [[ -f "$d" ]] && codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$d"
+          for fw in "$APP"/Frameworks/*/qemu-*; do
+            [[ -f "$fw" ]] && codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$fw"
           done
           codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP"
           mkdir -p dist
@@ -113,10 +113,13 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.3.1
-          name: Helion 1.3.1
+          tag_name: v1.4.0
+          name: Helion 1.4.0
           prerelease: false
           make_latest: true
+          files: dist/Helion.ipa
+          body: |
+            1.4.0 — code fixes.
           files: dist/Helion.ipa
           body: |
             1.3.1 — Diagnostic

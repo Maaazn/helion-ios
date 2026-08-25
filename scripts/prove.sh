@@ -39,20 +39,20 @@ prove_bin() {
   echo "PROOF_OK $name" | tee -a "$OUT"
 }
 
-prove_bin "$DIR/qemu-system-aarch64" qemu-system-aarch64
 prove_bin "$DIR/qemu-system-x86_64" qemu-system-x86_64
-# dylib optional when Helion is statically linked with QEMU
+FW="$DIR/Frameworks/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu"
+if [[ -f "$FW" ]]; then
+  prove_bin "$FW" qemu-x86_64-softmmu.framework
+fi
 
 if [[ -n "$APP" ]]; then
   echo "== Helion.app ==" | tee -a "$OUT"
   [[ -d "$APP" ]] || fail "Helion.app missing"
   prove_bin "$APP/Helion" Helion 20000
-  HELSZ=$(stat -f%z "$APP/Helion" 2>/dev/null || stat -c%s "$APP/Helion")
-  if [[ "$HELSZ" -gt 5000000 ]]; then
-    echo "PROOF_OK qemu-static-in-helion size=$HELSZ" | tee -a "$OUT"
-  else
-    [[ -f "$APP/libqemu-system-x86_64.dylib" ]] || fail "libqemu-system-x86_64.dylib not in app"
-  fi
+  FAPP="$APP/Frameworks/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu"
+  [[ -f "$FAPP" ]] || fail "qemu-x86_64-softmmu.framework missing from app"
+  prove_bin "$FAPP" app-qemu-framework
+  [[ -d "$APP/qemu" ]] && echo "PROOF_OK bios-dir" | tee -a "$OUT"
   [[ -f "$APP/QEMU-COPYING" ]] || fail "QEMU-COPYING missing"
   echo "PROOF_OK app" | tee -a "$OUT"
 fi

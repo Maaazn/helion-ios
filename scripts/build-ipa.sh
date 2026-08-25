@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-1.1.2}"
+VER="${HELION_VERSION:-1.4.0}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
@@ -75,16 +75,19 @@ cp "$ROOT/LICENSE" "$APP/LICENSE"
 
 if [[ -n "${QEMU_DIR:-}" && -d "$QEMU_DIR" ]]; then
   for f in "$QEMU_DIR"/*COPYING*; do [[ -f "$f" ]] && cp "$f" "$APP/"; done
-  [[ -f "$QEMU_DIR/qemu-system-aarch64" ]] && cp "$QEMU_DIR/qemu-system-aarch64" "$APP/" && chmod +x "$APP/qemu-system-aarch64"
-  [[ -f "$QEMU_DIR/qemu-system-x86_64" ]] && cp "$QEMU_DIR/qemu-system-x86_64" "$APP/" && chmod +x "$APP/qemu-system-x86_64"
-  for d in "$QEMU_DIR"/libqemu-system-*.dylib; do
-    [[ -f "$d" ]] && cp "$d" "$APP/" && chmod +x "$d"
-  done
-  [[ -f "$QEMU_DIR/qemu-build.log" ]] && cp "$QEMU_DIR/qemu-build.log" "$APP/"
+  if [[ -d "$QEMU_DIR/Frameworks" ]]; then
+    mkdir -p "$APP/Frameworks"
+    cp -R "$QEMU_DIR/Frameworks/"* "$APP/Frameworks/" || true
+  fi
+  if [[ -d "$QEMU_DIR/bios" ]]; then
+    mkdir -p "$APP/qemu"
+    cp -R "$QEMU_DIR/bios/"* "$APP/qemu/" || true
+  fi
   if [[ -d "$QEMU_DIR/osxkvm" ]]; then
     mkdir -p "$APP/OSX-KVM"
     cp -R "$QEMU_DIR/osxkvm/"* "$APP/OSX-KVM/" || true
   fi
+  [[ -f "$QEMU_DIR/qemu-build.log" ]] && cp "$QEMU_DIR/qemu-build.log" "$APP/"
 fi
 
 python3 - "$APP/AppIcon1024x1024.png" <<'PY'
@@ -125,29 +128,12 @@ done
 
 xcrun --sdk iphoneos clang \
   -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
-  -fobjc-arc -fblocks -c \
+  -fobjc-arc -fblocks \
+  -Wl,-rpath,@executable_path/Frameworks \
+  -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
+  -framework CoreGraphics -framework QuartzCore \
   "$ROOT/app/Helion.m" \
-  -o "$OUT/Helion.o"
-
-QEMU_LINKED=0
-if [[ -n "${QEMU_DIR:-}" && -d "${QEMU_DIR:-}/src-qemu/build" ]]; then
-  if python3 "$ROOT/scripts/link-qemu-inprocess.py" \
-      "$QEMU_DIR/src-qemu/build" "$BIN" exe "$OUT/Helion.o"; then
-    QEMU_LINKED=1
-    echo "HELION_QEMU_STATIC=1"
-  fi
-fi
-if [[ "$QEMU_LINKED" != 1 ]]; then
-  echo "HELION_QEMU_STATIC=0 using allowed undefined qemu_* for UI"
-  xcrun --sdk iphoneos clang \
-    -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
-    -fobjc-arc -fblocks \
-    -Wl,-U,_qemu_init -Wl,-U,_qemu_main_loop -Wl,-U,_qemu_cleanup \
-    -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
-    -framework GameController -framework CoreGraphics -framework QuartzCore \
-    "$OUT/Helion.o" \
-    -o "$BIN"
-fi
+  -o "$BIN"
 
 xattr -cr "$APP" || true
 ls -lh "$BIN"

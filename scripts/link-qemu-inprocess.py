@@ -113,7 +113,8 @@ def main():
     if mode == "dylib":
         parts = replace_output(parts, str(dest))
         # insert -dynamiclib after compiler
-        parts[1:1] = ["-dynamiclib", "-install_name", "@executable_path/" + dest.name]
+        parts[1:1] = ["-dynamiclib", "-install_name",
+                      "@rpath/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu"]
     else:
         filtered = []
         for p in parts:

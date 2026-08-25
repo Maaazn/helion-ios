@@ -1,4 +1,4 @@
-// Helion 1.3.1 — force dylib + host log + minimal argv
+// Helion 1.4.0 — QEMU as iOS framework (in-process). Windows & macOS.
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <dlfcn.h>
@@ -108,7 +108,12 @@ static HelionEngine *GEng;
     return GEng;
 }
 + (NSString *)libX86 {
-    return [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"libqemu-system-x86_64.dylib"];
+    return [[[NSBundle mainBundle] bundlePath]
+        stringByAppendingPathComponent:@"Frameworks/qemu-x86_64-softmmu.framework/qemu-x86_64-softmmu"];
+}
++ (NSString *)bios:(NSString *)name {
+    return [[[[NSBundle mainBundle] bundlePath]
+        stringByAppendingPathComponent:@"qemu"] stringByAppendingPathComponent:name];
 }
 + (unsigned long long)sz:(NSString *)p {
     return [[[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil][NSFileSize] unsignedLongLongValue];
@@ -118,8 +123,8 @@ static HelionEngine *GEng;
 }
 + (NSString *)status {
     unsigned long long xs = [self sz:[self libX86]];
-    return [NSString stringWithFormat:@"dylib x86 %llu bytes\npath ok: %@",
-            xs, xs > 1000000 ? @"yes" : @"NO"];
+    unsigned long long bios = [self sz:[self bios:@"edk2-x86_64-code.fd"]];
+    return [NSString stringWithFormat:@"framework %llu\nEDK2 %llu", xs, bios];
 }
 - (NSArray *)argvFor:(NSString *)kind {
     [HelionStore ensureDisk:kind];
@@ -130,13 +135,37 @@ static HelionEngine *GEng;
         @"-machine", @"q35",
         @"-cpu", @"qemu64",
         @"-accel", @"tcg",
-        @"-m", @"512",
-        @"-smp", @"1",
+        @"-m", @"1024",
+        @"-smp", @"2",
         @"-display", @"vnc=127.0.0.1:0",
         @"-vga", @"std",
-        @"-nodefaults",
+        @"-usb", @"-device", @"usb-tablet",
         @"-boot", @"order=c",
         nil];
+    NSString *code = [HelionEngine bios:@"edk2-x86_64-code.fd"];
+    NSString *varsSrc = [HelionEngine bios:@"edk2-i386-vars.fd"];
+    if ([HelionEngine sz:code] > 1000) {
+        NSString *work = [[HelionStore root] stringByAppendingPathComponent:@"run"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:work withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *vars = [work stringByAppendingPathComponent:@"OVMF_VARS.fd"];
+        if ([HelionEngine sz:varsSrc] > 1000 && [HelionEngine sz:vars] == 0) {
+            [[NSFileManager defaultManager] copyItemAtPath:varsSrc toPath:vars error:nil];
+        }
+        [a addObject:@"-drive"];
+        [a addObject:[NSString stringWithFormat:@"if=pflash,format=raw,readonly=on,file=%@", code]];
+        if ([HelionEngine sz:vars] > 0) {
+            [a addObject:@"-drive"];
+            [a addObject:[NSString stringWithFormat:@"if=pflash,format=raw,file=%@", vars]];
+        }
+    }
+    if ([kind isEqualToString:@"mac"]) {
+        NSString *oc = [[[[NSBundle mainBundle] bundlePath]
+            stringByAppendingPathComponent:@"OSX-KVM"] stringByAppendingPathComponent:@"OpenCore.qcow2"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:oc]) {
+            [a addObject:@"-drive"];
+            [a addObject:[NSString stringWithFormat:@"if=ide,format=qcow2,file=%@", oc]];
+        }
+    }
 
     if ([HelionStore hasISO:kind]) {
         [a addObject:@"-cdrom"];
@@ -155,7 +184,7 @@ static HelionEngine *GEng;
 
     // reset log
     [@"" writeToFile:[HelionStore logPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    HLog(@"=== Helion 1.3.1 host log ===");
+    HLog(@"=== Helion 1.4.0 ===");
     HLog(@"kind=%@", kind);
 
     NSArray *args = [self argvFor:kind];
@@ -497,7 +526,7 @@ static HelionEngine *GEng;
     [self.view addSubview:mark];
 
     UILabel *sub = [UILabel new];
-    sub.text = @"1.3.1 diagnostic build";
+    sub.text = @"Windows and macOS. You bring the ISO.";
     sub.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
     sub.textColor = [HCopper() colorWithAlphaComponent:0.9];
     sub.translatesAutoresizingMaskIntoConstraints = NO;
