@@ -56,7 +56,21 @@ cat > "$APP/Info.plist" <<PLIST
     </dict>
   </dict>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
-  <key>GCSupportsGameMode</key><false/>
+  <key>UISupportsDocumentBrowser</key><false/>
+  <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+  <key>NSPhotoLibraryUsageDescription</key><string>Pick a cursor image or wallpaper.</string>
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.maaazn.helion.cur</string>
+      <key>UTTypeDescription</key><string>Windows Cursor</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>cur</string><string>ani</string></array>
+      </dict>
+    </dict>
+  </array>
 </dict></plist>
 PLIST
 
@@ -122,7 +136,7 @@ done
 xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc \
   -framework Foundation -framework UIKit -framework GameController \
-  -framework CoreGraphics -framework QuartzCore \
+  -framework CoreGraphics -framework QuartzCore -framework UniformTypeIdentifiers \
   "$ROOT/Puck.m" -o "$APP/Helion"
 
 ls -lh "$APP/Helion"
