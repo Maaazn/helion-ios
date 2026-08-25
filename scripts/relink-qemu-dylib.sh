@@ -35,14 +35,16 @@ lines = os.environ["NINJA_INPUTS"].splitlines()
 files = []
 for l in lines:
     l = l.strip()
-    if not (l.endswith(".o") or l.endswith(".a")):
+    if not l.endswith(".o"):
+        continue
+    if "/stubs_" in l or "/stubs/" in l:
         continue
     p = l if os.path.isabs(l) else os.path.join(bdir, l)
     if os.path.isfile(p):
         files.append(p)
 pref = pathlib.Path(out) / "prefix" / "lib"
 if pref.is_dir():
-    for a in pref.glob("*.a"):
+    for a in sorted(pref.glob("*.a")):
         files.append(str(a))
 print("nobj", len(files), dest)
 cmd = [cc, "-dynamiclib", "-arch", "arm64", "-isysroot", sdk,
