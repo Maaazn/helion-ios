@@ -13,4 +13,13 @@ done
 test -n "$SRC"
 mkdir -p "$(dirname "$DEST")"
 cp -f "$SRC" "$DEST"
-ls -lh "$DEST"
+# overwrite git-lfs stubs with real Mach-O from xcframeworks
+DL="src/MeloNX/MeloNX/Dependencies/Dynamic Libraries"
+XC="src/MeloNX/MeloNX/Dependencies/XCFrameworks"
+cp -f "$XC/libavcodec.xcframework/ios-arm64/libavcodec.framework/libavcodec" "$DL/libavcodec.dylib"
+cp -f "$XC/libavutil.xcframework/ios-arm64/libavutil.framework/libavutil" "$DL/libavutil.dylib"
+if [[ -f "$DL/libMoltenVK.dylib" ]] && grep -q 'git-lfs' "$DL/libMoltenVK.dylib" 2>/dev/null; then
+  echo "MoltenVK is still an LFS pointer" >&2
+  exit 1
+fi
+ls -lh "$DEST" "$DL"/*.dylib
