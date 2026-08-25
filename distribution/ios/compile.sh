@@ -1,19 +1,16 @@
 #!/bin/bash
-
-# Define the destination directory (hardcoded)
-DESTINATION_DIR="src/MeloNX/Dependencies/Dynamic\ Libraries/Ryujinx.Headless.SDL2.dylib"
-
-dotnet clean
-
-# Restore the project 
+set -euo pipefail
+DEST="src/MeloNX/MeloNX/Dependencies/Dynamic Libraries/Ryujinx.Headless.SDL2.dylib"
 dotnet restore
-
-# Build the project with the specified version 
-# dotnet build -c Release
-
-# Publish the project with the specified runtime and settings 
 dotnet publish -c Release -r ios-arm64 -p:ExtraDefineConstants=DISABLE_UPDATER src/Ryujinx.Headless.SDL2 --self-contained true
-
-# Move the published .dylib to the specified location
-mv src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/native/Ryujinx.Headless.SDL2.dylib src/MeloNX/MeloNX/Dependencies/Dynamic\ Libraries/Ryujinx.Headless.SDL2.dylib
-
+SRC=""
+for c in \
+  src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/publish/Ryujinx.Headless.SDL2.dylib \
+  src/Ryujinx.Headless.SDL2/bin/Release/net8.0/ios-arm64/native/Ryujinx.Headless.SDL2.dylib
+do
+  if [[ -f "$c" ]]; then SRC="$c"; break; fi
+done
+test -n "$SRC"
+mkdir -p "$(dirname "$DEST")"
+cp -f "$SRC" "$DEST"
+ls -lh "$DEST"
