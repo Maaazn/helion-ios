@@ -15,6 +15,10 @@
 
 extern char **environ;
 
+int qemu_init(int argc, char **argv, char **envp) __attribute__((weak));
+void qemu_main_loop(void) __attribute__((weak));
+void qemu_cleanup(int status) __attribute__((weak));
+
 static UIColor *HNavy(void) { return [UIColor colorWithRed:0.05 green:0.07 blue:0.12 alpha:1]; }
 static UIColor *HCard(void) { return [UIColor colorWithRed:0.10 green:0.13 blue:0.20 alpha:1]; }
 static UIColor *HCopper(void) { return [UIColor colorWithRed:0.91 green:0.66 blue:0.49 alpha:1]; }
@@ -93,8 +97,10 @@ static HelionEngine *GEng;
 }
 + (BOOL)ready { return [self sz:[self libX86]] > 1000000ull || [self sz:[self libARM]] > 1000000ull; }
 + (NSString *)status {
-    return [NSString stringWithFormat:@"x86 dylib %llu\narm dylib %llu",
-        [self sz:[self libX86]], [self sz:[self libARM]]];
+    unsigned long long xs = [self sz:[self libX86]];
+    unsigned long long asz = [self sz:[self libARM]];
+    return [NSString stringWithFormat:@"qemu_init %s\nx86 dylib %llu\narm dylib %llu",
+        qemu_init ? "linked" : "missing", xs, asz];
 }
 - (NSArray *)argvFor:(NSString *)kind {
     BOOL mac = [kind isEqualToString:@"mac"];
@@ -143,27 +149,36 @@ static HelionEngine *GEng;
 }
 - (NSString *)startKind:(NSString *)kind log:(void (^)(NSString *))log {
     if (self.running) return @"already running";
-    NSString *lib = [HelionEngine libX86];
-    if ([HelionEngine sz:lib] < 1000000ull) lib = [HelionEngine libARM];
-    if ([HelionEngine sz:lib] < 1000000ull)
-        return @"QEMU dylib missing — in-process engine not in this IPA";
-    _dl = dlopen(lib.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
-    if (!_dl) return [NSString stringWithFormat:@"dlopen: %s", dlerror()];
-    int (*qemu_init)(int, char **, char **) = dlsym(_dl, "qemu_init");
-    void (*qemu_main_loop)(void) = dlsym(_dl, "qemu_main_loop");
-    int (*qmain)(int, char **) = dlsym(_dl, "main");
-    if (!qemu_init && !qmain)
-        return @"dylib has no qemu_init/main (relink failed)";
     NSArray *args = [self argvFor:kind];
     if (log) log([args componentsJoinedByString:@" "]);
     int argc = (int)args.count;
     char **argv = calloc((size_t)argc + 1, sizeof(char *));
     for (int i = 0; i < argc; i++) argv[i] = strdup([args[i] UTF8String]);
     self.running = YES;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        if (qemu_init) {
+    if (qemu_init && qemu_main_loop) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
             qemu_init(argc, argv, environ);
-            if (qemu_main_loop) qemu_main_loop();
+            qemu_main_loop();
+            if (qemu_cleanup) qemu_cleanup(0);
+            self.running = NO;
+        });
+        return nil;
+    }
+    NSString *lib = [HelionEngine libX86];
+    if ([HelionEngine sz:lib] < 1000000ull) lib = [HelionEngine libARM];
+    if ([HelionEngine sz:lib] < 1000000ull)
+        return @"QEMU not linked into Helion (rebuild required)";
+    _dl = dlopen(lib.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
+    if (!_dl) return [NSString stringWithFormat:@"dlopen: %s", dlerror()];
+    int (*qinit)(int, char **, char **) = dlsym(_dl, "qemu_init");
+    void (*qloop)(void) = dlsym(_dl, "qemu_main_loop");
+    int (*qmain)(int, char **) = dlsym(_dl, "main");
+    if (!qinit && !qmain)
+        return @"dylib has no qemu_init/main";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (qinit) {
+            qinit(argc, argv, environ);
+            if (qloop) qloop();
         } else if (qmain) {
             qmain(argc, argv);
         }

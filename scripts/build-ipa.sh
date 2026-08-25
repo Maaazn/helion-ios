@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-1.1.1}"
+VER="${HELION_VERSION:-1.1.2}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
@@ -125,11 +125,28 @@ done
 
 xcrun --sdk iphoneos clang \
   -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
-  -fobjc-arc -fblocks \
-  -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
-  -framework GameController -framework CoreGraphics -framework QuartzCore \
+  -fobjc-arc -fblocks -c \
   "$ROOT/app/Helion.m" \
-  -o "$BIN"
+  -o "$OUT/Helion.o"
+
+QEMU_LINKED=0
+if [[ -n "${QEMU_DIR:-}" && -d "${QEMU_DIR:-}/src-qemu/build" ]]; then
+  if python3 "$ROOT/scripts/link-qemu-inprocess.py" \
+      "$QEMU_DIR/src-qemu/build" "$BIN" exe "$OUT/Helion.o"; then
+    QEMU_LINKED=1
+    echo "HELION_QEMU_STATIC=1"
+  fi
+fi
+if [[ "$QEMU_LINKED" != 1 ]]; then
+  echo "HELION_QEMU_STATIC=0 fallback UI-only link"
+  xcrun --sdk iphoneos clang \
+    -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
+    -fobjc-arc -fblocks \
+    -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
+    -framework GameController -framework CoreGraphics -framework QuartzCore \
+    "$OUT/Helion.o" \
+    -o "$BIN"
+fi
 
 xattr -cr "$APP" || true
 ls -lh "$BIN"
