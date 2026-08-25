@@ -13,23 +13,26 @@ concurrency:
 jobs:
   prove:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Build IPA
         run: |
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=1.7.0 scripts/build-ipa.sh
+          HELION_VERSION=1.8.0 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
           z=zipfile.ZipFile('dist/Helion.ipa')
           names=z.namelist()
           assert any(n.endswith('Helion.app/Helion') for n in names)
+          assert any('Helion.app/computer/TinyCore.iso' in n for n in names)
+          assert any('Helion.app/computer/v86.wasm' in n for n in names)
+          assert any('Helion.app/computer/index.html' in n for n in names)
           sz=os.path.getsize('dist/Helion.ipa')
           print('ipa', sz)
-          assert sz > 40*1024
+          assert sz > 10*1024*1024
           PY
 
       - name: Import p12 and codesign
@@ -63,10 +66,33 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.0
-          name: Puck 1.7.0
+          tag_name: v1.8.0
+          name: Puck 1.8.0 — Linux computer
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            code fixes.
+            # Puck 1.8.0 — حاسوب لينكس داخل التطبيق
+
+            **هذا لينكس حقيقي.** الضيف هو Tiny Core Linux 11.0 (نواة 5.4.3-tinycore، سطح Xvesa/FLWM) يعمل داخل Puck عبر محاكي [v86](https://github.com/copy/v86) (x86 في WebAssembly).
+
+            الآيفون ARM64 لا يحمّل نواة لينكس على العتاد. المسار المسموح هو المحاكاة داخل التطبيق — وهذا ما نُصدره. مو كسر، مو exploit.
+
+            ## مؤشر الآيفون
+
+            مؤشر النظام على الشاشة الرئيسية ما زال عبر **AssistiveTouch**: فعّله مرة، وأطفئ «إظهار القائمة دائماً» حتى يختفي الزر العائم. الإعداد يبقى.
+
+            داخل لينكس: مؤشر الضيف (X11). اضغط الشاشة لالتقاط الماوس.
+
+            ## This is real Linux (GPL)
+
+            | Piece | License | Source |
+            | --- | --- | --- |
+            | Linux kernel in Tiny Core 11.0 | GPL-2.0 | [tinycorelinux.net/11.x](https://www.tinycorelinux.net/11.x/) · [kernel.org](https://www.kernel.org/) |
+            | Tiny Core Linux 11.0 | mixed OSI | [tinycorelinux.net](https://tinycorelinux.net/) |
+            | v86 | BSD-2-Clause | [copy/v86](https://github.com/copy/v86) |
+            | SeaBIOS / VGA BIOS | LGPL | with v86 |
+            | Puck pointer + shell | original | this repo |
+
+            Sideload `Helion.ipa` (display name **Puck**, bundle `com.maaazn.helion`).
+            First boot takes about a minute, then `startx` brings up the desktop.

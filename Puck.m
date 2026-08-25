@@ -1,8 +1,17 @@
-// Puck 1.7.0 — system pointer is AssistiveTouch on + menu hidden. Persistent.
+// Puck 1.8.0 — system pointer is AssistiveTouch. One setup, then it stays.
+//
+// Video proof (iPhone, USB mouse):
+//   AT off → 1 HID (USB Gaming Mouse), overlay only, no hover, no Home pointer.
+//   AT on  → 2 HID (virtual "Mouse" + USB), UIHoverGestureRecognizer fires,
+//            SpringBoard pointer on Home / Control Center.
+//   UIAccessibilityIsAssistiveTouchRunning and AX getters stay NO/free from a
+//   sideload. Truth is mice.count >= 2 or a hover event. Keep USB claimed.
+//   Always Show Menu off hides the nubbit. The setting itself is the permanence.
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
@@ -26,6 +35,16 @@ static void PuckSetWantSystem(BOOL on) {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     [d setBool:on forKey:kPuckSystemKey];
     [d synchronize];
+}
+
+static BOOL PuckIsAR(void) {
+    for (NSString *l in NSLocale.preferredLanguages) {
+        if ([l hasPrefix:@"ar"]) return YES;
+    }
+    return [[NSLocale currentLocale].languageCode.lowercaseString hasPrefix:@"ar"];
+}
+static NSString *PuckS(NSString *en, NSString *ar) {
+    return PuckIsAR() ? ar : en;
 }
 
 static BOOL PuckOpenSensitive(NSString *s) {
@@ -103,15 +122,6 @@ static BOOL PuckAXCallC(const char *name, BOOL on) {
     return YES;
 }
 
-static BOOL PuckAXGetC(const char *name, BOOL *outVal) {
-    if (!outVal) return NO;
-    PuckLoadAX();
-    BOOL (*fn)(void) = dlsym(RTLD_DEFAULT, name);
-    if (!fn) return NO;
-    *outVal = fn();
-    return YES;
-}
-
 static BOOL PuckAXSet(id obj, NSString *name, BOOL on) {
     if (!obj) return NO;
     SEL sel = NSSelectorFromString(name);
@@ -147,22 +157,6 @@ static BOOL PuckAXSetDouble(id obj, NSString *name, double v) {
     return YES;
 }
 
-static BOOL PuckAXGetBool(id obj, NSString *name, BOOL *outVal) {
-    if (!obj || !outVal) return NO;
-    SEL sel = NSSelectorFromString(name);
-    if (![obj respondsToSelector:sel]) return NO;
-    NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
-    if (!sig) return NO;
-    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-    inv.target = obj;
-    inv.selector = sel;
-    [inv invoke];
-    BOOL v = NO;
-    [inv getReturnValue:&v];
-    *outVal = v;
-    return YES;
-}
-
 static void PuckPrefBool(CFStringRef key, BOOL on) {
     CFPreferencesSetValue(key, on ? kCFBooleanTrue : kCFBooleanFalse,
                           CFSTR("com.apple.Accessibility"),
@@ -183,67 +177,51 @@ static NSString *PuckHIDDump(void) {
     return [NSString stringWithFormat:@"%lu %@", (unsigned long)mice.count, [parts componentsJoinedByString:@" + "]];
 }
 
-/* Video proof: AT off = 1 USB mouse, no SpringBoard pointer.
-   AT on  = 2 mice (USB + AssistiveTouch virtual) and pointer on Home.
-   Hardware must stay claimed. Always Show Menu off hides the nubbit. */
-static BOOL PuckSystemLive(void) {
+/* Video: 1 USB = visual only. 2 = USB + AssistiveTouch virtual "Mouse" = system pointer. */
+static BOOL PuckTwoMice(void) {
+    return GCMouse.mice.count >= 2;
+}
+
+static BOOL PuckSystemLive(BOOL sawHover) {
+    if (PuckTwoMice()) return YES;
+    if (sawHover) return YES;
     if (UIAccessibilityIsAssistiveTouchRunning()) return YES;
-    if (GCMouse.mice.count >= 2) return YES;
-    BOOL en = NO;
-    if (PuckAXGetC("AXSAssistiveTouchEnabled", &en) && en) return YES;
     return NO;
 }
 
-static NSString *PuckApplySystemPointer(BOOL enable) {
+static void PuckNudgeAssistiveTouch(void) {
     id ax = PuckAXSettings();
-    if (enable) {
-        PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
-        PuckAXCallC("AXSAssistiveTouchSetHardwareEnabled", YES);
-        PuckAXCallC("AXSAssistiveTouchSetUIEnabled", YES);
-        PuckAXCallC("AXSAssistiveTouchSetAlwaysShowMenu", NO);
+    PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
+    PuckAXCallC("AXSAssistiveTouchSetHardwareEnabled", YES);
+    PuckAXCallC("AXSAssistiveTouchSetUIEnabled", YES);
+    PuckAXCallC("AXSAssistiveTouchSetAlwaysShowMenu", NO);
 
-        PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
-        PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", YES);
-        PuckAXSet(ax, @"setAssistiveTouchUIEnabled:", YES);
-        PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
-        PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
-        PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
-        PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
+    PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
+    PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", YES);
+    PuckAXSet(ax, @"setAssistiveTouchUIEnabled:", YES);
+    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
+    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
+    PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
+    PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
 
-        PuckPrefBool(CFSTR("AssistiveTouchEnabled"), YES);
-        PuckPrefBool(CFSTR("AlwaysShowMenu"), NO);
-        PuckPrefBool(CFSTR("AssistiveTouchAlwaysShowMenu"), NO);
-        CFPreferencesSynchronize(CFSTR("com.apple.Accessibility"),
-                                 kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
-    }
+    PuckPrefBool(CFSTR("AssistiveTouchEnabled"), YES);
+    PuckPrefBool(CFSTR("AlwaysShowMenu"), NO);
+    PuckPrefBool(CFSTR("AssistiveTouchAlwaysShowMenu"), NO);
+    CFPreferencesSynchronize(CFSTR("com.apple.Accessibility"),
+                             kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
 
     notify_post("com.apple.accessibility.cache.assistivetouch");
     notify_post("com.apple.accessibility.cache.assistivetouch.menu");
     notify_post("com.apple.pointerui.reset");
-
-    BOOL running = UIAccessibilityIsAssistiveTouchRunning();
-    BOOL en = NO, menu = YES, hw = NO;
-    PuckAXGetC("AXSAssistiveTouchEnabled", &en);
-    PuckAXGetC("AXSAssistiveTouchAlwaysShowMenu", &menu);
-    PuckAXGetC("AXSAssistiveTouchHardwareEnabled", &hw);
-    if (!en) PuckAXGetBool(ax, @"assistiveTouchEnabled", &en);
-    BOOL menuGot = PuckAXGetBool(ax, @"assistiveTouchAlwaysShowMenuEnabled", &menu);
-    (void)menuGot;
-    BOOL live = PuckSystemLive();
-
-    NSMutableArray *hit = [NSMutableArray new];
-    [hit addObject:PuckHIDDump()];
-    [hit addObject:[NSString stringWithFormat:@"AT-run %@", running ? @"YES" : @"NO"]];
-    [hit addObject:live ? @"system LIVE" : @"visual only"];
-    [hit addObject:[NSString stringWithFormat:@"menu %@", menu ? @"shown" : @"hidden"]];
-    [hit addObject:[NSString stringWithFormat:@"hw %@", hw ? @"claimed" : @"free"]];
-    return [hit componentsJoinedByString:@" · "];
 }
 
 static NSArray<NSString *> *PuckAssistiveTouchURLs(void) {
     return @[
         @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
+        @"app-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
         @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH/ASSISTIVE_TOUCH",
         @"prefs:root=ACCESSIBILITY#TOUCH_REACHABILITY_TITLE"
     ];
 }
@@ -409,10 +387,16 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     NSArray<UIButton *> *_shapeBtns;
     NSArray<UIButton *> *_deskBtns;
     UILabel *_sysNote;
+    UIButton *_enableBtn;
+    UIButton *_linuxBtn;
     NSInteger _pickKind;
-    BOOL _askedOnce;
+    BOOL _sawHover;
+    BOOL _setupShown;
+    UIView *_veil;
+    NSTimer *_watch;
 }
 - (void)dealloc {
+    [_watch invalidate];
     if (_connectObs) [NSNotificationCenter.defaultCenter removeObserver:_connectObs];
     if (_disconnectObs) [NSNotificationCenter.defaultCenter removeObserver:_disconnectObs];
     if (_activeObs) [NSNotificationCenter.defaultCenter removeObserver:_activeObs];
@@ -436,15 +420,22 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
+    _linuxBtn = [self mintBtn:PuckS(@"Linux", @"لينكس") action:@selector(closeToComputer) ghost:YES];
+    _linuxBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    _linuxBtn.hidden = YES;
+    [self.view addSubview:_linuxBtn];
+
     _sub = [UILabel new];
     _sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     _sub.textColor = Mint();
+    _sub.numberOfLines = 2;
     _sub.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_sub];
 
     _device = [UILabel new];
     _device.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
     _device.textColor = Dim();
+    _device.textAlignment = NSTextAlignmentRight;
     _device.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_device];
 
@@ -473,7 +464,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     }
 
     _status = [UILabel new];
-    _status.text = @"Move the mouse";
+    _status.text = PuckS(@"Move the mouse", @"حرّك الماوس");
     _status.textColor = Pearl();
     _status.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     _status.translatesAutoresizingMaskIntoConstraints = NO;
@@ -505,15 +496,15 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     desks.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:desks];
 
-    UIButton *loadC = [self mintBtn:@"Cursor file  (.cur / .png)" action:@selector(loadCursor)];
-    UIButton *loadW = [self mintBtn:@"Wallpaper" action:@selector(loadWall) ghost:YES];
+    UIButton *loadC = [self mintBtn:PuckS(@"Cursor file  (.cur / .png)", @"ملف المؤشر  (.cur / .png)") action:@selector(loadCursor)];
+    UIButton *loadW = [self mintBtn:PuckS(@"Wallpaper", @"خلفية") action:@selector(loadWall) ghost:YES];
     loadC.translatesAutoresizingMaskIntoConstraints = NO;
     loadW.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:loadC];
     [bar addSubview:loadW];
 
     UILabel *visL = [UILabel new];
-    visL.text = @"Show pointer";
+    visL.text = PuckS(@"Show pointer", @"إظهار المؤشر");
     visL.textColor = Pearl();
     visL.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     visL.translatesAutoresizingMaskIntoConstraints = NO;
@@ -526,7 +517,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [bar addSubview:_visible];
 
     UILabel *sysL = [UILabel new];
-    sysL.text = @"System pointer";
+    sysL.text = PuckS(@"System pointer · stays on", @"مؤشر النظام · يبقى شغال");
     sysL.textColor = Pearl();
     sysL.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     sysL.translatesAutoresizingMaskIntoConstraints = NO;
@@ -539,7 +530,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [bar addSubview:_system];
 
     UILabel *szL = [UILabel new];
-    szL.text = @"Size"; szL.textColor = Dim();
+    szL.text = PuckS(@"Size", @"الحجم"); szL.textColor = Dim();
     szL.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     szL.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:szL];
@@ -551,7 +542,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [bar addSubview:_size];
 
     UILabel *spL = [UILabel new];
-    spL.text = @"Speed"; spL.textColor = Dim();
+    spL.text = PuckS(@"Speed", @"السرعة"); spL.textColor = Dim();
     spL.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     spL.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:spL];
@@ -562,14 +553,14 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *pc = [self mintBtn:@"Open AssistiveTouch" action:@selector(openAssistiveTouch)];
-    pc.translatesAutoresizingMaskIntoConstraints = NO;
-    [bar addSubview:pc];
+    _enableBtn = [self mintBtn:PuckS(@"Enable on iPhone", @"تفعيل على الآيفون") action:@selector(openSetup)];
+    _enableBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [bar addSubview:_enableBtn];
 
     _sysNote = [UILabel new];
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-    _sysNote.numberOfLines = 3;
+    _sysNote.numberOfLines = 2;
     _sysNote.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_sysNote];
 
@@ -579,8 +570,14 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [title.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [_sub.topAnchor constraintEqualToAnchor:title.bottomAnchor],
         [_sub.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+        [_sub.trailingAnchor constraintEqualToAnchor:_device.leadingAnchor constant:-8],
         [_device.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [_device.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
+        [_linuxBtn.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+        [_linuxBtn.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [_linuxBtn.heightAnchor constraintEqualToConstant:32],
+        [_linuxBtn.widthAnchor constraintGreaterThanOrEqualToConstant:68],
+        [_device.trailingAnchor constraintEqualToAnchor:_linuxBtn.leadingAnchor constant:-8],
+        [_device.widthAnchor constraintLessThanOrEqualToConstant:170],
         [_stage.topAnchor constraintEqualToAnchor:_sub.bottomAnchor constant:8],
         [_stage.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14],
         [_stage.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-14],
@@ -612,6 +609,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_visible.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [sysL.topAnchor constraintEqualToAnchor:visL.bottomAnchor constant:10],
         [sysL.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
+        [sysL.trailingAnchor constraintEqualToAnchor:_system.leadingAnchor constant:-8],
         [_system.centerYAnchor constraintEqualToAnchor:sysL.centerYAnchor],
         [_system.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [szL.topAnchor constraintEqualToAnchor:sysL.bottomAnchor constant:8],
@@ -624,28 +622,33 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_speed.centerYAnchor constraintEqualToAnchor:spL.centerYAnchor],
         [_speed.leadingAnchor constraintEqualToAnchor:spL.trailingAnchor constant:10],
         [_speed.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
-        [pc.topAnchor constraintEqualToAnchor:spL.bottomAnchor constant:8],
-        [pc.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
-        [pc.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
-        [pc.heightAnchor constraintEqualToConstant:40],
-        [_sysNote.topAnchor constraintEqualToAnchor:pc.bottomAnchor constant:4],
+        [_enableBtn.topAnchor constraintEqualToAnchor:spL.bottomAnchor constant:8],
+        [_enableBtn.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
+        [_enableBtn.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
+        [_enableBtn.heightAnchor constraintEqualToConstant:40],
+        [_sysNote.topAnchor constraintEqualToAnchor:_enableBtn.bottomAnchor constant:4],
         [_sysNote.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
         [_sysNote.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
         [_sysNote.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor]
     ]];
 
+    [self buildSetup];
+
     __weak PuckHome *wself = self;
     _connectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself bindMouse:n.object];
         [wself refreshDevice];
-        if (PuckWantSystem()) [wself applySystem:NO];
+        [wself maybeFinishSetup];
     }];
     _disconnectObs = [NSNotificationCenter.defaultCenter addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself refreshDevice];
     }];
     _activeObs = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         [wself refreshDevice];
-        if (PuckWantSystem()) [wself applySystem:NO];
+        if (PuckWantSystem()) {
+            PuckNudgeAssistiveTouch();
+            [wself maybeFinishSetup];
+        }
     }];
     [self applyTip];
     [self markChips];
@@ -707,11 +710,17 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
+    _linuxBtn.hidden = (self.presentingViewController == nil);
     _pos = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2);
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
     [self refreshDevice];
-    if (PuckWantSystem()) [self applySystem:NO];
+    if (PuckWantSystem()) {
+        PuckNudgeAssistiveTouch();
+        if (!PuckSystemLive(_sawHover)) [self openSetup];
+        else [self maybeFinishSetup];
+        [self startWatch];
+    }
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self placeCursor]; }
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
@@ -741,39 +750,62 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         };
     }
 }
+- (NSString *)idleStatus {
+    return PuckSystemLive(_sawHover)
+        ? PuckS(@"System pointer live", @"مؤشر النظام شغال")
+        : PuckS(@"Pointer live", @"المؤشر شغال");
+}
 - (void)refreshDevice {
-    BOOL live = PuckSystemLive();
+    BOOL live = PuckSystemLive(_sawHover);
     BOOL want = PuckWantSystem();
     GCMouse *m = GCMouse.current ?: GCMouse.mice.firstObject;
     if (m) {
         _device.text = PuckHIDDump();
         _device.textColor = Mint();
-        if (![_status.text hasPrefix:@"click"] && ![_status.text hasPrefix:@"hit"] && ![_status.text hasPrefix:@"scroll"]) {
-            _status.text = live ? @"System pointer live" : @"Pointer live";
-        }
+        NSString *st = _status.text;
+        BOOL busy = [st hasPrefix:@"click"] || [st hasPrefix:@"hit"] || [st hasPrefix:@"scroll"]
+            || [st hasPrefix:@"Hover"] || [st hasPrefix:@"تمرير"];
+        if (!busy) _status.text = [self idleStatus];
         _cursor.hidden = !_shown;
     } else {
-        _device.text = @"No mouse";
+        _device.text = PuckS(@"No mouse", @"ما في ماوس");
         _device.textColor = Dim();
-        _status.text = @"Plug a mouse";
+        _status.text = PuckS(@"Plug a mouse", @"وصّل ماوس");
     }
     if (want && live) {
-        _sub.text = @"System pointer on. Stays on.";
+        _sub.text = PuckS(@"System pointer on. Home Screen too. Stays on.",
+                          @"مؤشر النظام شغال. الشاشة الرئيسية بعد. يبقى.");
+        [_enableBtn setTitle:PuckS(@"On · Home Screen · stays on", @"شغال · الشاشة الرئيسية · يبقى") forState:UIControlStateNormal];
+        _enableBtn.alpha = 1;
+        _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"system LIVE", @"system LIVE")];
     } else if (want) {
-        _sub.text = @"System pointer: turn AssistiveTouch on once.";
+        _sub.text = PuckS(@"Turn AssistiveTouch on once — then it stays.",
+                          @"فعّل اللمس المساعد مرة واحدة — بعدها يبقى.");
+        [_enableBtn setTitle:PuckS(@"Enable on iPhone", @"تفعيل على الآيفون") forState:UIControlStateNormal];
+        _enableBtn.alpha = 1;
+        _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"visual only", @"visual only")];
     } else {
-        _sub.text = @"Your pointer. Visual only.";
+        _sub.text = PuckS(@"Your pointer. Visual only.", @"مؤشّرك. داخل التطبيق فقط.");
+        [_enableBtn setTitle:PuckS(@"System pointer is off", @"مؤشر النظام طافي") forState:UIControlStateNormal];
+        _enableBtn.alpha = 0.55;
+        _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"in-app", @"in-app")];
     }
 }
 - (void)hover:(UIHoverGestureRecognizer *)g {
     CGPoint p = [g locationInView:self.view];
     if (g.state == UIGestureRecognizerStateChanged || g.state == UIGestureRecognizerStateBegan) {
+        BOOL first = !_sawHover;
+        _sawHover = YES;
         _pos = p;
         [self placeCursor];
         [self drip];
-        _status.text = @"Hover";
+        _status.text = PuckS(@"Hover", @"تمرير");
         _coords.text = [NSString stringWithFormat:@"%.0f  ×  %.0f", _pos.x, _pos.y];
         if (_shown) _cursor.hidden = NO;
+        if (first) {
+            [self refreshDevice];
+            [self maybeFinishSetup];
+        }
     }
 }
 - (void)nudge:(CGPoint)d {
@@ -787,7 +819,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _coords.text = [NSString stringWithFormat:@"%.0f  ×  %.0f", _pos.x, _pos.y];
     if (_shown) _cursor.hidden = NO;
     [self drip];
-    _status.text = PuckSystemLive() ? @"System pointer live" : @"Pointer live";
+    _status.text = [self idleStatus];
 }
 - (void)placeCursor {
     CGFloat z = 48 * _scale;
@@ -795,6 +827,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _cursor.center = CGPointMake(_pos.x + (0.5 - _cursor.tip.x)*z, _pos.y + (0.5 - _cursor.tip.y)*z);
     [_cursor setNeedsDisplay];
     [self.view bringSubviewToFront:_cursor];
+    if (_veil && !_veil.hidden) [self.view bringSubviewToFront:_veil];
 }
 - (void)drip {
     if (!_shown) return;
@@ -814,7 +847,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)click:(BOOL)p {
     _cursor.pressed = p;
     [_cursor setNeedsDisplay];
-    _status.text = p ? @"click" : (PuckSystemLive() ? @"System pointer live" : @"Pointer live");
+    _status.text = p ? @"click" : [self idleStatus];
     if (p) [_haptic notificationOccurred:UINotificationFeedbackTypeSuccess];
 }
 - (void)rightClick { _status.text = @"right click"; }
@@ -887,38 +920,225 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)toggleSystem {
     BOOL on = _system.on;
     PuckSetWantSystem(on);
-    _askedOnce = NO;
     if (on) {
-        [self applySystem:YES];
+        PuckNudgeAssistiveTouch();
+        [self refreshDevice];
+        [self startWatch];
+        if (PuckSystemLive(_sawHover)) [self maybeFinishSetup];
+        else [self openSetup];
     } else {
-        _sysNote.text = @"System pointer off. In-app only. AssistiveTouch is left as you set it.";
+        [self hideSetup];
+        [_watch invalidate];
+        _watch = nil;
         [self refreshDevice];
     }
 }
-- (void)applySystem:(BOOL)promptIfNeeded {
-    NSString *ok = PuckApplySystemPointer(YES);
-    _sysNote.text = ok;
-    [self refreshDevice];
-    if (!promptIfNeeded) return;
-    if (PuckSystemLive()) return;
-    if (_askedOnce) return;
-    _askedOnce = YES;
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"AssistiveTouch once"
-        message:@"Turn AssistiveTouch on. Then turn Always Show Menu off. After that the pointer stays on the Home screen."
-        preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
-        PuckOpenPrefs(PuckAssistiveTouchURLs());
-    }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
+- (void)startWatch {
+    if (_watch) return;
+    __weak PuckHome *w = self;
+    _watch = [NSTimer scheduledTimerWithTimeInterval:0.7 repeats:YES block:^(NSTimer *t) {
+        [w refreshDevice];
+        [w maybeFinishSetup];
+        if (!PuckWantSystem()) { [t invalidate]; }
+    }];
 }
-- (void)openAssistiveTouch {
-    if (PuckWantSystem()) [self applySystem:NO];
+- (void)buildSetup {
+    _veil = [UIView new];
+    _veil.backgroundColor = [UIColor colorWithWhite:0 alpha:0.62];
+    _veil.hidden = YES;
+    _veil.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_veil];
+    [NSLayoutConstraint activateConstraints:@[
+        [_veil.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_veil.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_veil.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_veil.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
+    ]];
+
+    UIView *sheet = [UIView new];
+    sheet.backgroundColor = Card();
+    sheet.layer.cornerRadius = 22;
+    sheet.layer.borderWidth = 1;
+    sheet.layer.borderColor = [Mint() colorWithAlphaComponent:0.28].CGColor;
+    sheet.translatesAutoresizingMaskIntoConstraints = NO;
+    [_veil addSubview:sheet];
+
+    UILabel *h = [UILabel new];
+    h.text = PuckS(@"Permanent pointer", @"المؤشر الدائم");
+    h.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    h.textColor = Pearl();
+    h.textAlignment = NSTextAlignmentCenter;
+    h.translatesAutoresizingMaskIntoConstraints = NO;
+    [sheet addSubview:h];
+
+    UILabel *b = [UILabel new];
+    b.numberOfLines = 0;
+    b.textAlignment = NSTextAlignmentNatural;
+    b.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
+    b.textColor = Pearl();
+    b.text = PuckS(
+        @"iPhone hides the mouse pointer unless AssistiveTouch is on.\n\n1. Tap Open Settings\n2. Turn AssistiveTouch on\n3. Turn Always Show Menu off — the floating button hides\n\nAfter that the pointer is on the Home Screen and in every app. It stays until you turn AssistiveTouch off. One time.",
+        @"الآيفون يخفي مؤشر الماوس إلا إذا كان اللمس المساعد شغال.\n\n١. اضغط فتح الإعدادات\n٢. فعّل اللمس المساعد\n٣. أطفئ «إظهار القائمة دائماً» حتى يختفي الزر العائم\n\nبعدها المؤشر يظهر على الشاشة الرئيسية وكل التطبيقات. يبقى حتى تطفئه. مرة واحدة.");
+    b.translatesAutoresizingMaskIntoConstraints = NO;
+    [sheet addSubview:b];
+
+    UIButton *open = [self mintBtn:PuckS(@"Open AssistiveTouch settings", @"فتح إعدادات اللمس المساعد") action:@selector(jumpSettings)];
+    open.translatesAutoresizingMaskIntoConstraints = NO;
+    [sheet addSubview:open];
+
+    UIButton *later = [self mintBtn:PuckS(@"Later", @"لاحقاً") action:@selector(hideSetup) ghost:YES];
+    later.translatesAutoresizingMaskIntoConstraints = NO;
+    [sheet addSubview:later];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [sheet.leadingAnchor constraintEqualToAnchor:_veil.leadingAnchor constant:18],
+        [sheet.trailingAnchor constraintEqualToAnchor:_veil.trailingAnchor constant:-18],
+        [sheet.centerYAnchor constraintEqualToAnchor:_veil.centerYAnchor],
+        [h.topAnchor constraintEqualToAnchor:sheet.topAnchor constant:22],
+        [h.leadingAnchor constraintEqualToAnchor:sheet.leadingAnchor constant:18],
+        [h.trailingAnchor constraintEqualToAnchor:sheet.trailingAnchor constant:-18],
+        [b.topAnchor constraintEqualToAnchor:h.bottomAnchor constant:12],
+        [b.leadingAnchor constraintEqualToAnchor:sheet.leadingAnchor constant:18],
+        [b.trailingAnchor constraintEqualToAnchor:sheet.trailingAnchor constant:-18],
+        [open.topAnchor constraintEqualToAnchor:b.bottomAnchor constant:18],
+        [open.leadingAnchor constraintEqualToAnchor:sheet.leadingAnchor constant:18],
+        [open.trailingAnchor constraintEqualToAnchor:sheet.trailingAnchor constant:-18],
+        [open.heightAnchor constraintEqualToConstant:46],
+        [later.topAnchor constraintEqualToAnchor:open.bottomAnchor constant:8],
+        [later.leadingAnchor constraintEqualToAnchor:open.leadingAnchor],
+        [later.trailingAnchor constraintEqualToAnchor:open.trailingAnchor],
+        [later.heightAnchor constraintEqualToConstant:40],
+        [later.bottomAnchor constraintEqualToAnchor:sheet.bottomAnchor constant:-18]
+    ]];
+}
+- (void)openSetup {
+    if (!PuckWantSystem()) {
+        _system.on = YES;
+        PuckSetWantSystem(YES);
+    }
+    PuckNudgeAssistiveTouch();
+    if (PuckSystemLive(_sawHover)) {
+        [self maybeFinishSetup];
+        return;
+    }
+    _setupShown = YES;
+    _veil.hidden = NO;
+    _veil.alpha = 0;
+    [self.view bringSubviewToFront:_veil];
+    [UIView animateWithDuration:0.22 animations:^{ self->_veil.alpha = 1; }];
+    [self startWatch];
+}
+- (void)hideSetup {
+    _setupShown = NO;
+    [UIView animateWithDuration:0.18 animations:^{ self->_veil.alpha = 0; } completion:^(BOOL f) {
+        self->_veil.hidden = YES;
+    }];
+}
+- (void)jumpSettings {
+    PuckNudgeAssistiveTouch();
     PuckOpenPrefs(PuckAssistiveTouchURLs());
+    [self startWatch];
+}
+- (void)closeToComputer {
+    if (self.presentingViewController) {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+- (void)maybeFinishSetup {
+    if (!PuckWantSystem()) return;
+    if (!PuckSystemLive(_sawHover)) return;
+    if (_setupShown) {
+        [_haptic notificationOccurred:UINotificationFeedbackTypeSuccess];
+        [self hideSetup];
+    }
+    [self refreshDevice];
 }
 @end
 
-@interface PuckApp : UIResponder <UIApplicationDelegate>
+@interface PuckAssets : NSObject <WKURLSchemeHandler>
+@end
+@implementation PuckAssets
+- (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)task {
+    NSURL *url = task.request.URL;
+    NSString *path = url.path ?: @"/index.html";
+    if (path.length == 0 || [path isEqualToString:@"/"]) path = @"/index.html";
+    if ([path hasPrefix:@"/"]) path = [path substringFromIndex:1];
+    NSString *root = [[NSBundle mainBundle].resourcePath stringByAppendingPathComponent:@"computer"];
+    NSString *file = [[root stringByAppendingPathComponent:path] stringByStandardizingPath];
+    if (![file hasPrefix:[root stringByStandardizingPath]]) {
+        [task didFailWithError:[NSError errorWithDomain:@"puck" code:403 userInfo:nil]];
+        return;
+    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:file]) {
+        [task didFailWithError:[NSError errorWithDomain:@"puck" code:404 userInfo:nil]];
+        return;
+    }
+    NSData *data = [NSData dataWithContentsOfFile:file];
+    if (!data) {
+        [task didFailWithError:[NSError errorWithDomain:@"puck" code:500 userInfo:nil]];
+        return;
+    }
+    NSString *mime = @"application/octet-stream";
+    if ([path hasSuffix:@".html"]) mime = @"text/html";
+    else if ([path hasSuffix:@".js"]) mime = @"text/javascript";
+    else if ([path hasSuffix:@".wasm"]) mime = @"application/wasm";
+    else if ([path hasSuffix:@".css"]) mime = @"text/css";
+    else if ([path hasSuffix:@".txt"]) mime = @"text/plain";
+    NSDictionary *headers = @{
+        @"Content-Type": mime,
+        @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
+        @"Access-Control-Allow-Origin": @"*",
+        @"Cache-Control": @"public, max-age=3600"
+    };
+    NSHTTPURLResponse *resp = [[NSHTTPURLResponse alloc] initWithURL:url statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:headers];
+    [task didReceiveResponse:resp];
+    [task didReceiveData:data];
+    [task didFinish];
+}
+- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task {}
+@end
+
+@interface PuckComputer : UIViewController <WKScriptMessageHandler>
+@end
+@implementation PuckComputer {
+    WKWebView *_web;
+    PuckAssets *_assets;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = Ink();
+    _assets = [PuckAssets new];
+    WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
+    [cfg setURLSchemeHandler:_assets forURLScheme:@"puckasset"];
+    cfg.allowsInlineMediaPlayback = YES;
+    [cfg.userContentController addScriptMessageHandler:self name:@"puck"];
+    if (@available(iOS 14.0, *)) {
+        cfg.defaultWebpagePreferences.allowsContentJavaScript = YES;
+    }
+    _web = [[WKWebView alloc] initWithFrame:CGRectZero configuration:cfg];
+    _web.opaque = NO;
+    _web.backgroundColor = Ink();
+    _web.scrollView.bounces = NO;
+    _web.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    _web.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_web];
+    [NSLayoutConstraint activateConstraints:@[
+        [_web.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_web.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [_web.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_web.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
+    ]];
+    [_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"puckasset://app/index.html"]]];
+}
+- (void)userContentController:(WKUserContentController *)c didReceiveScriptMessage:(WKScriptMessage *)msg {
+    if (![msg.body isKindOfClass:[NSString class]]) return;
+    if ([msg.body isEqualToString:@"pointer"]) {
+        PuckHome *home = [PuckHome new];
+        home.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self presentViewController:home animated:YES completion:nil];
+    }
+}
+@end
 @end
 @implementation PuckApp
 - (BOOL)application:(UIApplication *)a didFinishLaunchingWithOptions:(NSDictionary *)o { return YES; }
@@ -930,7 +1150,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)opts {
     if (![scene isKindOfClass:[UIWindowScene class]]) return;
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-    self.window.rootViewController = [PuckHome new];
+    self.window.rootViewController = [PuckComputer new];
     self.window.backgroundColor = Ink();
     [self.window makeKeyAndVisible];
 }

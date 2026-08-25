@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>PUCK 1.8.0</title>
+<style>
+:root{--ink:#0a0b0f;--fg:#f5f6f8;--accent:#7dffcc;--dim:#8a8e99;--card:#1a1c24;--elev:#22242e;--border:#2a2d38}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--fg);font:15px/1.4 -apple-system,system-ui,sans-serif}
+body{display:flex;flex-direction:column}
+header,footer{display:flex;align-items:center;gap:8px;padding:8px 12px;border-color:var(--border);background:var(--ink);flex-shrink:0}
+header{border-bottom:1px solid var(--border);padding-top:max(8px,env(safe-area-inset-top))}
+footer{border-top:1px solid var(--border);padding-bottom:max(8px,env(safe-area-inset-bottom));font:12px ui-monospace,Menlo,monospace;color:var(--dim);justify-content:space-between}
+h1{margin:0;font-size:14px;letter-spacing:.04em}
+.sub{color:var(--accent);font:12px ui-monospace,Menlo,monospace}
+.btn{height:36px;border:0;border-radius:8px;background:var(--elev);color:var(--fg);padding:0 12px;font-weight:600}
+#screen{flex:1;min-height:0;position:relative;background:#000;overflow:hidden;cursor:none}
+#screen canvas{image-rendering:pixelated;width:100%;height:100%;object-fit:contain}
+#hud{position:absolute;inset:12px auto auto 12px;max-width:20rem;pointer-events:none}
+.card{background:rgba(18,20,28,.88);border:1px solid #3a3f4c;border-radius:10px;padding:10px 12px}
+.bar{height:4px;background:var(--elev);border-radius:2px;margin-top:8px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);width:0}
+#grab{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:none}
+#sheet{display:none;position:absolute;inset:0;background:rgba(0,0,0,.55);align-items:flex-end;justify-content:center}
+#sheet.on{display:flex}
+.panel{background:var(--card);border-radius:18px 18px 0 0;padding:18px;max-width:40rem;width:100%;max-height:80%;overflow:auto}
+.panel h2{margin:0 0 10px;font-size:18px}
+.panel p,.panel li{color:var(--fg);font-size:14px}
+.panel a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div style="flex:1;min-width:0">
+    <h1>PUCK 1.8.0</h1>
+    <div class="sub">Tiny Core Linux · kernel inside</div>
+  </div>
+  <button class="btn" id="bPtr" type="button">مؤشر</button>
+  <button class="btn" id="bLic" type="button">تراخيص</button>
+  <button class="btn" id="bRe" type="button">إعادة</button>
+</header>
+<div id="screen">
+  <div id="hud">
+    <div class="card">
+      <div id="phase">تحميل نظام لينكس</div>
+      <div class="bar"><i id="prog"></i></div>
+    </div>
+  </div>
+  <button class="btn" id="grab" type="button">اضغط لالتقاط الماوس — مؤشر لينكس</button>
+</div>
+<footer>
+  <span>v86 + Tiny Core 11 · GPL kernel</span>
+  <span id="foot">click screen</span>
+</footer>
+<div id="sheet">
+  <div class="panel" id="panel"></div>
+</div>
+<script>
+window.global = window;
+if (typeof window.setImmediate !== "function") {
+  window.setImmediate = function (fn) { return window.setTimeout(fn, 0); };
+}
+</script>
+<script src="libv86.js"></script>
+<script>
+(function () {
+  var screenEl = document.getElementById("screen");
+  var hud = document.getElementById("hud");
+  var phaseEl = document.getElementById("phase");
+  var prog = document.getElementById("prog");
+  var grab = document.getElementById("grab");
+  var foot = document.getElementById("foot");
+  var sheet = document.getElementById("sheet");
+  var panel = document.getElementById("panel");
+  var emu = null;
+  var serialBuf = "";
+
+  function showSheet(html) {
+    panel.innerHTML = html + '<p><button class="btn" id="xSheet" type="button">إغلاق</button></p>';
+    sheet.className = "on";
+    document.getElementById("xSheet").onclick = function () { sheet.className = ""; };
+  }
+  sheet.addEventListener("click", function (e) {
+    if (e.target === sheet) sheet.className = "";
+  });
+
+  document.getElementById("bLic").onclick = function () {
+    showSheet(
+      "<h2>تراخيص · هذا لينكس حقيقي</h2>" +
+      "<p>Puck يشغّل نواة Linux داخل التطبيق عبر محاكي v86 (x86 في WebAssembly). هذا مسموح: الإيموليشن داخل التطبيق، مو كسر للنظام.</p>" +
+      "<p>الآيفون ARM64 لا يحمّل نواة لينكس على العتاد. المسار القانوني هو محاكاة داخل Puck.</p>" +
+      "<ul>" +
+      "<li><a href='https://www.kernel.org/'>Linux kernel</a> — GPL-2.0، داخل Tiny Core 11.0. المصدر: tinycorelinux.net/11.x</li>" +
+      "<li><a href='https://tinycorelinux.net/'>Tiny Core Linux 11.0</a> — سطح مكتب صغير (FLWM / Xvesa)</li>" +
+      "<li><a href='https://github.com/copy/v86'>v86</a> — BSD-2-Clause</li>" +
+      "<li>SeaBIOS + VGA BIOS — LGPL</li>" +
+      "<li>Puck — مؤشر آيفون وإطار الضيف. أصلي</li>" +
+      "</ul>" +
+      "<p>Real Linux. Source links are required because the kernel is GPL-2.0.</p>"
+    );
+  };
+  document.getElementById("bPtr").onclick = function () {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.puck) {
+      window.webkit.messageHandlers.puck.postMessage("pointer");
+      return;
+    }
+    showSheet(
+      "<h2>مؤشر الآيفون</h2>" +
+      "<p>داخل لينكس: مؤشر الضيف (X11). نخفي مؤشر المتصفح فوق الشاشة.</p>" +
+      "<p>على الشاشة الرئيسية للآيفون ما زال اللمس المساعد هو الطريق الدائم: فعّله مرة، وأطفئ «إظهار القائمة دائماً».</p>"
+    );
+  };
+
+  function grabMouse() {
+    if (!emu) return;
+    try { emu.lock_mouse(); } catch (e) {}
+    try { emu.mouse_set_enabled(true); } catch (e) {}
+    try { emu.keyboard_set_enabled(true); } catch (e) {}
+  }
+  screenEl.addEventListener("click", grabMouse);
+  grab.addEventListener("click", function (e) { e.stopPropagation(); grabMouse(); });
+
+  document.getElementById("bRe").onclick = function () {
+    hud.style.display = "block";
+    phaseEl.textContent = "إقلاع النواة";
+    grab.style.display = "none";
+    if (emu) emu.restart();
+  };
+
+  emu = new V86({
+    wasm_path: "v86.wasm",
+    memory_size: 128 * 1024 * 1024,
+    vga_memory_size: 8 * 1024 * 1024,
+    screen: { container: screenEl, use_graphical_text: true },
+    bios: { url: "seabios.bin" },
+    vga_bios: { url: "vgabios.bin" },
+    cdrom: { url: "TinyCore.iso", async: false },
+    autostart: true,
+    disable_speaker: true,
+    fastboot: true,
+    boot_order: 0x213
+  });
+
+  emu.add_listener("download-progress", function (p) {
+    if (p.lengthComputable && p.total) {
+      prog.style.width = Math.round(Math.min(1, p.loaded / p.total) * 100) + "%";
+    }
+  });
+  emu.add_listener("emulator-ready", function () {
+    phaseEl.textContent = "إقلاع النواة";
+    prog.style.width = "100%";
+    [2000, 5000, 9000, 14000].forEach(function (t) {
+      setTimeout(function () { try { emu.keyboard_send_text("\n"); } catch (e) {} }, t);
+    });
+    setTimeout(function () { try { emu.keyboard_send_text("startx\n"); } catch (e) {} }, 75000);
+  });
+  emu.add_listener("serial0-output-byte", function (b) {
+    serialBuf += String.fromCharCode(b);
+    if (serialBuf.indexOf("Booting Core") >= 0) phaseEl.textContent = "Booting Core 11.0";
+  });
+  emu.add_listener("screen-set-size", function (arg) {
+    var w = 0, h = 0, bpp = 0;
+    if (Array.isArray(arg)) { w = +arg[0]; h = +arg[1]; bpp = +arg[2]; }
+    foot.textContent = w + "×" + h + " " + bpp + "bpp";
+    if (bpp >= 8 && w >= 320) {
+      hud.style.display = "none";
+      grab.style.display = "block";
+    }
+  });
+  emu.add_listener("mouse-enable", function (on) {
+    grab.style.display = on ? "none" : "block";
+    if (on) foot.textContent = "pointer captured";
+  });
+})();
+</script>
+</body>
+</html>

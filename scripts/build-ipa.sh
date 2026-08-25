@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
-VER="${HELION_VERSION:-1.0.0}"
+VER="${HELION_VERSION:-1.8.0}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 DIST="${HELION_DIST:-$ROOT/dist}"
@@ -56,6 +56,7 @@ cat > "$APP/Info.plist" <<PLIST
     </dict>
   </dict>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
+  <key>UIApplicationSupportsIndirectInputEvents</key><true/>
   <key>UISupportsDocumentBrowser</key><false/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
   <key>LSApplicationQueriesSchemes</key>
@@ -143,7 +144,13 @@ xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min="$MIN" -isysroot "
   -fobjc-arc \
   -framework Foundation -framework UIKit -framework GameController \
   -framework CoreGraphics -framework QuartzCore -framework UniformTypeIdentifiers \
+  -framework WebKit \
   "$ROOT/Puck.m" -o "$APP/Helion"
+
+mkdir -p "$APP/computer"
+if [ -d "$ROOT/computer" ]; then
+  cp -R "$ROOT/computer/." "$APP/computer/"
+fi
 
 ls -lh "$APP/Helion"
 ( cd "$OUT" && zip -r -y "$DIST/Helion.ipa" Payload )

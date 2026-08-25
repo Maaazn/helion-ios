@@ -1,0 +1,7 @@
+TinyCore-11.0.iso
+Source: https://i.copy.sh/TinyCore-11.0.iso
+Upstream: https://tinycorelinux.net/11.x/
+Size: 19922944 bytes
+
+This is a real Linux distribution (kernel + Xvesa desktop).
+Kernel license: GPL-2.0. Get kernel source from Tiny Core 11.x / kernel.org.
