@@ -108,10 +108,14 @@ static HelionEngine *GEng;
 struct HelionQRun {
     int argc;
     char **argv;
+    char **envp;
     int (*qinit)(int, char **, char **);
     void (*qloop)(void);
     int (*qmain)(int, char **);
     char logpath[1024];
+    char cwd[1024];
+    char tmpdir[1024];
+    char home[1024];
 };
 
 static void *HelionQemuPthread(void *arg) {
@@ -122,12 +126,15 @@ static void *HelionQemuPthread(void *arg) {
         dup2(fd, STDERR_FILENO);
         if (fd > 2) close(fd);
     }
-    fprintf(stderr, "[qemu-thread] start stack=8M\n");
+    if (r->cwd[0]) chdir(r->cwd);
+    setenv("TMPDIR", r->tmpdir, 1);
+    setenv("HOME", r->home, 1);
+    fprintf(stderr, "[qemu-thread] cwd=%s tmp=%s\n", r->cwd, r->tmpdir);
     fflush(stderr);
     if (r->qinit) {
         fprintf(stderr, "[qemu-thread] qemu_init argc=%d\n", r->argc);
         fflush(stderr);
-        int rc = r->qinit(r->argc, r->argv, environ);
+        int rc = r->qinit(r->argc, (char **)r->argv, r->envp);
         fprintf(stderr, "[qemu-thread] qemu_init rc=%d\n", rc);
         fflush(stderr);
         if (rc == 0 && r->qloop) {
@@ -136,7 +143,7 @@ static void *HelionQemuPthread(void *arg) {
             r->qloop();
         }
     } else if (r->qmain) {
-        r->qmain(r->argc, r->argv);
+        r->qmain(r->argc, (char **)r->argv);
     }
     fprintf(stderr, "[qemu-thread] exit\n");
     fflush(stderr);
@@ -173,36 +180,20 @@ static void *HelionQemuPthread(void *arg) {
 
     // MINIMAL argv — strip everything that can hang init
     NSString *biosDir = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"qemu"];
+    // Same shape UTM uses on iPhone: SeaBIOS + pc + small RAM + VNC.
     NSMutableArray *a = [NSMutableArray arrayWithObjects:
-        @"qemu-system-x86_64",
+        @"qemu-x86_64-softmmu",
         @"-L", biosDir,
-        @"-machine", @"q35",
+        @"-machine", @"pc",
         @"-cpu", @"qemu64",
         @"-accel", @"tcg",
-        @"-m", @"2048",
-        @"-smp", @"2",
+        @"-m", @"512",
+        @"-smp", @"1",
         @"-display", @"vnc=127.0.0.1:0",
         @"-vga", @"std",
-        @"-rtc", @"base=localtime",
-        @"-usb", @"-device", @"usb-tablet",
         @"-boot", @"order=c",
         nil];
-    NSString *code = [HelionEngine bios:@"edk2-x86_64-code.fd"];
-    NSString *varsSrc = [HelionEngine bios:@"edk2-i386-vars.fd"];
-    if ([HelionEngine sz:code] > 1000) {
-        NSString *work = [[HelionStore root] stringByAppendingPathComponent:@"run"];
-        [[NSFileManager defaultManager] createDirectoryAtPath:work withIntermediateDirectories:YES attributes:nil error:nil];
-        NSString *vars = [work stringByAppendingPathComponent:@"OVMF_VARS.fd"];
-        if ([HelionEngine sz:varsSrc] > 1000 && [HelionEngine sz:vars] == 0) {
-            [[NSFileManager defaultManager] copyItemAtPath:varsSrc toPath:vars error:nil];
-        }
-        [a addObject:@"-drive"];
-        [a addObject:[NSString stringWithFormat:@"if=pflash,format=raw,readonly=on,file=%@", code]];
-        if ([HelionEngine sz:vars] > 0) {
-            [a addObject:@"-drive"];
-            [a addObject:[NSString stringWithFormat:@"if=pflash,format=raw,file=%@", vars]];
-        }
-    }
+    // SeaBIOS only — skip pflash so qemu_init is fast (UTM still uses EDK2 later).
     if ([kind isEqualToString:@"mac"]) {
         NSString *oc = [[[[NSBundle mainBundle] bundlePath]
             stringByAppendingPathComponent:@"OSX-KVM"] stringByAppendingPathComponent:@"OpenCore.qcow2"];
@@ -229,7 +220,7 @@ static void *HelionQemuPthread(void *arg) {
 
     // reset log
     [@"" writeToFile:[HelionStore logPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    HLog(@"=== Helion 1.5.0 ===");
+    HLog(@"=== Helion 1.5.1 ===");
     HLog(@"kind=%@", kind);
 
     NSArray *args = [self argvFor:kind];
@@ -246,7 +237,7 @@ static void *HelionQemuPthread(void *arg) {
         return @"QEMU dylib missing";
     }
 
-    _dl = dlopen(lib.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
+    _dl = dlopen(lib.fileSystemRepresentation, RTLD_LOCAL);
     if (!_dl) {
         const char *e = dlerror();
         HLog(@"dlopen FAILED: %s", e ? e : "?");
@@ -270,19 +261,36 @@ static void *HelionQemuPthread(void *arg) {
 
     self.running = YES;
     if (log) log(@"Calling qemu_init…");
-    HLog(@"calling qemu on 8MB pthread (not GCD)");
+
+    NSString *home = NSHomeDirectory();
+    NSString *tmp = NSTemporaryDirectory();
+    NSString *biosDir = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"qemu"];
+
+    NSArray *envLines = @[
+        [NSString stringWithFormat:@"TMPDIR=%@", tmp],
+        [NSString stringWithFormat:@"HOME=%@", home],
+        [NSString stringWithFormat:@"XDG_CACHE_HOME=%@", home],
+        @"G_MESSAGES_DEBUG=all",
+    ];
+    char **envp = calloc(envLines.count + 1, sizeof(char *));
+    for (NSUInteger i = 0; i < envLines.count; i++) envp[i] = strdup([envLines[i] UTF8String]);
 
     struct HelionQRun *run = calloc(1, sizeof(*run));
     run->argc = argc;
     run->argv = argv;
+    run->envp = envp;
     run->qinit = qinit;
     run->qloop = qloop;
     run->qmain = qmain;
     strncpy(run->logpath, [HelionStore logPath].fileSystemRepresentation, 1023);
+    strncpy(run->cwd, biosDir.fileSystemRepresentation, 1023);
+    strncpy(run->tmpdir, tmp.fileSystemRepresentation, 1023);
+    strncpy(run->home, home.fileSystemRepresentation, 1023);
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 8u << 20);
+    pthread_attr_setstacksize(&attr, 16u << 20);
+    pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INTERACTIVE, 0);
     int prc = pthread_create(&_thr, &attr, HelionQemuPthread, run);
     pthread_attr_destroy(&attr);
     if (prc != 0) {
@@ -685,13 +693,22 @@ static void *HelionQemuPthread(void *arg) {
 @end
 @implementation HelionAppDelegate
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opt {
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    return YES;
+}
+@end
+
+@interface HelionSceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@end
+@implementation HelionSceneDelegate
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)opts {
+    if (![scene isKindOfClass:[UIWindowScene class]]) return;
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[HelionHome new]];
     nav.navigationBar.barStyle = UIBarStyleBlack;
     nav.navigationBar.tintColor = HIce();
     self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
-    return YES;
 }
 @end
 

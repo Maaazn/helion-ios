@@ -8,7 +8,7 @@ OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 BIN="$APP/Helion"
 DIST="${HELION_DIST:-$ROOT/dist}"
-VER="${HELION_VERSION:-1.5.0}"
+VER="${HELION_VERSION:-1.5.1}"
 
 rm -rf "$OUT"
 mkdir -p "$APP" "$DIST"
@@ -29,7 +29,24 @@ cat > "$APP/Info.plist" <<'PLIST'
   <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>16.0</string>
-  <key>UILaunchScreen</key><dict/>
+  <key>UILaunchScreen</key>
+  <dict>
+    <key>UIColorName</key><string></string>
+  </dict>
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key><false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key><string>Default</string>
+          <key>UISceneDelegateClassName</key><string>HelionSceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
   <key>CFBundleIcons</key>
   <dict>
     <key>CFBundlePrimaryIcon</key>
