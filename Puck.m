@@ -1,4 +1,4 @@
-// Puck 1.4 — Pointer Control is on iPhone. Mouse HID unlocks the pane.
+// Puck 1.5 — pointer via AT hardware path; hide nubbit (Always Show Menu).
 
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -77,43 +77,77 @@ static BOOL PuckAXSet(id obj, NSString *name, BOOL on) {
     return YES;
 }
 
+static BOOL PuckAXSetDouble(id obj, NSString *name, double v) {
+    if (!obj) return NO;
+    SEL sel = NSSelectorFromString(name);
+    if (![obj respondsToSelector:sel]) return NO;
+    NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
+    if (!sig || sig.numberOfArguments < 3) return NO;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = obj;
+    inv.selector = sel;
+    [inv setArgument:&v atIndex:2];
+    [inv invoke];
+    return YES;
+}
+
+static BOOL PuckAXGetBool(id obj, NSString *name, BOOL *outVal) {
+    if (!obj || !outVal) return NO;
+    SEL sel = NSSelectorFromString(name);
+    if (![obj respondsToSelector:sel]) return NO;
+    NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
+    if (!sig) return NO;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = obj;
+    inv.selector = sel;
+    [inv invoke];
+    BOOL v = NO;
+    [inv getReturnValue:&v];
+    *outVal = v;
+    return YES;
+}
+
 static NSString *PuckEnableIPhonePointer(void) {
-    NSMutableArray *hit = [NSMutableArray new];
     id ax = PuckAXSettings();
-    BOOL at = NO;
-    at |= PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
-    at |= PuckAXCallC("_AXSAssistiveTouchSetEnabled", YES);
-    at |= PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
-    at |= PuckAXSet(ax, @"setAssistiveTouchOn:", YES);
-    if (at) [hit addObject:@"AssistiveTouch"];
-    BOOL menu = NO;
-    menu |= PuckAXCallC("AXSAssistiveTouchAlwaysShowMenuSetEnabled", NO);
-    menu |= PuckAXCallC("AXSAlwaysShowMenuSetEnabled", NO);
-    menu |= PuckAXSet(ax, @"setAlwaysShowMenuEnabled:", NO);
-    menu |= PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
-    menu |= PuckAXSet(ax, @"setAlwaysShowMenu:", NO);
-    if (menu) [hit addObject:@"menu hidden"];
-    BOOL ptr = NO;
-    ptr |= PuckAXCallC("AXSPointerControlSetEnabled", YES);
-    ptr |= PuckAXSet(ax, @"setPointerControlEnabled:", YES);
-    ptr |= PuckAXSet(ax, @"setMousePointerEnabled:", YES);
-    ptr |= PuckAXSet(ax, @"setPointerIncreaseContrastEnabled:", YES);
-    if (ptr) [hit addObject:@"Pointer Control API"];
+    PuckAXCallC("AXSAssistiveTouchSetEnabled", YES);
+    PuckAXSet(ax, @"setAssistiveTouchHardwareEnabled:", YES);
+    PuckAXSet(ax, @"setAssistiveTouchEnabled:", YES);
+    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenu:", NO);
+    PuckAXSet(ax, @"setAssistiveTouchAlwaysShowMenuEnabled:", NO);
+    PuckAXSet(ax, @"setAssistiveTouchInternalOnlyHiddenNubbitModeEnabled:", YES);
+    PuckAXSetDouble(ax, @"setAssistiveTouchIdleOpacity:", 0);
     notify_post("com.apple.accessibility.cache.assistivetouch");
     notify_post("com.apple.accessibility.AssistiveTouch.enabled");
+
     BOOL hid = (GCMouse.current != nil) || (GCMouse.mice.count > 0);
-    [hit addObject:hid ? @"HID unlocked" : @"plug mouse to unlock pane"];
+    BOOL running = UIAccessibilityIsAssistiveTouchRunning();
+    BOOL en = NO, menu = YES, hw = NO, nub = NO;
+    PuckAXGetBool(ax, @"assistiveTouchEnabled", &en);
+    PuckAXGetBool(ax, @"assistiveTouchAlwaysShowMenuEnabled", &menu);
+    PuckAXGetBool(ax, @"assistiveTouchHardwareEnabled", &hw);
+    PuckAXGetBool(ax, @"assistiveTouchInternalOnlyHiddenNubbitModeEnabled", &nub);
+
+    NSMutableArray *hit = [NSMutableArray new];
+    [hit addObject:hid ? @"HID" : @"no mouse"];
+    [hit addObject:[NSString stringWithFormat:@"AT %@", running || en ? @"on" : @"off"]];
+    [hit addObject:[NSString stringWithFormat:@"menu %@", menu ? @"shown" : @"hidden"]];
+    if (nub) [hit addObject:@"nubbit hidden"];
+    if (hw) [hit addObject:@"hardware"];
+    if (!running && !en) [hit addObject:@"open Always Show Menu"];
     return [hit componentsJoinedByString:@" · "];
 }
 
 static NSArray<NSString *> *PuckPointerControlURLs(void) {
     return @[
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE#AlwaysShowMenu",
+        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
+        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE",
+        @"App-prefs:root=General&path=TRACKPAD",
+        @"prefs:root=General&path=TRACKPAD",
         @"App-prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
         @"prefs:root=ACCESSIBILITY&path=POINTER_CONTROL",
-        @"App-prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
-        @"prefs:root=ACCESSIBILITY&path=TOUCH_REACHABILITY_TITLE/AIR_TOUCH_TITLE/ASTMousePointerCustomization",
-        @"App-prefs:root=ACCESSIBILITY",
-        @"prefs:root=ACCESSIBILITY"
+        @"App-prefs:root=ACCESSIBILITY"
     ];
 }
 
@@ -414,7 +448,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    UIButton *sys = [self mintBtn:@"Unlock pointer" action:@selector(systemPointer)];
+    UIButton *sys = [self mintBtn:@"Hide AT button" action:@selector(systemPointer)];
     sys.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:sys];
     UIButton *pc = [self mintBtn:@"Pointer Control" action:@selector(openPointerControl) ghost:YES];
@@ -422,7 +456,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [bar addSubview:pc];
 
     _sysNote = [UILabel new];
-    _sysNote.text = @"Pointer Control is on iPhone. Plug the mouse — the pane unlocks.";
+    _sysNote.text = @"AT on + Always Show Menu off = pointer, no button.";
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     _sysNote.numberOfLines = 2;
@@ -728,6 +762,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     NSString *ok = PuckEnableIPhonePointer();
     _sysNote.text = ok;
     _status.text = ok;
+    if ([ok containsString:@"AT off"] || [ok containsString:@"menu shown"]) {
+        PuckOpenPrefs(PuckPointerControlURLs());
+    }
 }
 - (void)openPointerControl {
     [self systemPointer];
