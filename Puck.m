@@ -399,8 +399,6 @@ static void PuckOpenAssistiveTouchSettings(void) {
 - (void)targetTap:(UIButton *)b {
     _status.text = [NSString stringWithFormat:@"hit  %@", b.currentTitle];
 }
-    _status.text = [NSString stringWithFormat:@"hit  %@", b.currentTitle];
-}
 - (void)toggleVisible {
     _shown = _visible.on;
     _cursor.hidden = !_shown;
