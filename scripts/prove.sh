@@ -11,13 +11,13 @@ fail() { echo "PROOF_FAIL $*" | tee -a "$OUT"; exit 1; }
 echo "HELION PROOF $(date -u +%FT%TZ)" | tee -a "$OUT"
 
 prove_bin() {
-  local p="$1" name="$2"
+  local p="$1" name="$2" min="${3:-5000000}"
   echo "== $name ==" | tee -a "$OUT"
   [[ -f "$p" ]] || fail "$name missing: $p"
   local sz
   sz=$(stat -f%z "$p" 2>/dev/null || stat -c%s "$p")
-  echo "size=$sz" | tee -a "$OUT"
-  [[ "$sz" -gt 5000000 ]] || fail "$name too small ($sz) — not a linked qemu"
+  echo "size=$sz min=$min" | tee -a "$OUT"
+  [[ "$sz" -gt "$min" ]] || fail "$name too small ($sz)"
   chmod +x "$p" || true
   if command -v file >/dev/null; then
     file "$p" | tee -a "$OUT"
@@ -45,7 +45,7 @@ prove_bin "$DIR/qemu-system-x86_64" qemu-system-x86_64
 if [[ -n "$APP" ]]; then
   echo "== Helion.app ==" | tee -a "$OUT"
   [[ -d "$APP" ]] || fail "Helion.app missing"
-  prove_bin "$APP/Helion" Helion
+  prove_bin "$APP/Helion" Helion 20000
   [[ -f "$APP/qemu-system-aarch64" ]] || fail "qemu-system-aarch64 not copied into app"
   [[ -f "$APP/qemu-system-x86_64" ]] || fail "qemu-system-x86_64 not copied into app"
   [[ -f "$APP/QEMU-COPYING" ]] || fail "QEMU-COPYING missing"

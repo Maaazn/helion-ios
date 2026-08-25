@@ -90,5 +90,7 @@ xcrun --sdk iphoneos clang \
 
 xattr -cr "$APP" || true
 ls -lh "$BIN"
-echo "built $APP"
-# No IPA. Proof gate runs first.
+mkdir -p "$DIST"
+( cd "$OUT" && zip -r -y "$DIST/Helion.ipa" Payload )
+ls -lh "$DIST/Helion.ipa"
+echo "built $DIST/Helion.ipa"

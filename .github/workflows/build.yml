@@ -45,14 +45,61 @@ jobs:
           APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
           scripts/prove.sh "$RUNNER_TEMP/qemu-ios" "$APP" "$GITHUB_WORKSPACE/PROOF.txt"
           cat "$GITHUB_WORKSPACE/PROOF.txt"
+          grep -q "PROOF_OK all" "$GITHUB_WORKSPACE/PROOF.txt"
 
       - name: Upload proof
         uses: actions/upload-artifact@v4
         with:
           name: helion-proof
-          path: |
-            PROOF.txt
-            build/ipa/Payload/Helion.app/Helion
+          path: PROOF.txt
           if-no-files-found: error
 
-      # No GitHub Release. No published IPA.
+      - name: Import p12 and codesign
+        env:
+          CERT_BASE64: ${{ secrets.IOS_SIGNING_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
+          CERT_PATH: ${{ runner.temp }}/signing.p12
+          KEYCHAIN_PATH: ${{ runner.temp }}/build.keychain-db
+          KEYCHAIN_PASSWORD: temporary-keychain-password
+        run: |
+          set -euo pipefail
+          test -n "${CERT_BASE64:-}"
+          python3 - <<'PY'
+          import base64, os
+          open(os.environ["CERT_PATH"], "wb").write(base64.b64decode(os.environ["CERT_BASE64"]))
+          PY
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          IDENT=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | python3 -c 'import sys,re; t=sys.stdin.read(); m=re.search(r"\"([^\"]+)\"", t); print(m.group(1) if m else "")')
+          echo "identity=$IDENT"
+          APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
+          ENT="$GITHUB_WORKSPACE/app/Helion.entitlements"
+          test -f "$GITHUB_WORKSPACE/PROOF.txt"
+          grep -q "PROOF_OK all" "$GITHUB_WORKSPACE/PROOF.txt"
+          if [[ -f "$APP/qemu-system-aarch64" ]]; then
+            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-aarch64"
+          fi
+          if [[ -f "$APP/qemu-system-x86_64" ]]; then
+            codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP/qemu-system-x86_64"
+          fi
+          codesign --force --sign "$IDENT" --entitlements "$ENT" --generate-entitlement-der --timestamp=none "$APP"
+          mkdir -p dist
+          rm -f dist/Helion.ipa
+          (cd "$GITHUB_WORKSPACE/build/ipa" && zip -r -y "$GITHUB_WORKSPACE/dist/Helion.ipa" Payload)
+          ls -lh dist/Helion.ipa
+
+      - name: Publish IPA
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0
+          name: Helion 0.1.0
+          prerelease: false
+          make_latest: true
+          files: dist/Helion.ipa
+          body: |
+            0.1.0 — code fixes.
+
