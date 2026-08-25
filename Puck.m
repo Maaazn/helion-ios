@@ -570,9 +570,12 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)loadWall { _pickKind = 1; [self pickFile]; }
 - (void)pickFile {
     NSArray *types = @[
-        UTType.image, UTType.png, UTType.jpeg, UTType.heic,
-        [UTType typeWithFilenameExtension:@"cur"] ?: UTType.data,
-        [UTType typeWithFilenameExtension:@"ani"] ?: UTType.data
+        [UTType typeWithIdentifier:@"public.image"],
+        [UTType typeWithIdentifier:@"public.png"],
+        [UTType typeWithIdentifier:@"public.jpeg"],
+        [UTType typeWithIdentifier:@"public.heic"],
+        [UTType typeWithFilenameExtension:@"cur"] ?: [UTType typeWithIdentifier:@"public.data"],
+        [UTType typeWithFilenameExtension:@"ani"] ?: [UTType typeWithIdentifier:@"public.data"]
     ];
     UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
     p.delegate = self;
