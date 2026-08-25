@@ -256,7 +256,6 @@ static HelionEngine *GEng;
     _connected = NO;
     if (self.onStatus) self.onStatus(@"Waiting for display (VNC)…");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        // Retry for ~40 seconds
         for (int i = 0; i < 80 && self->_run; i++) {
             if ([self tryConnect]) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -334,17 +333,15 @@ static HelionEngine *GEng;
         [self readn:name n:(int)nlen];
     }
 
-    // Request 32-bit BGRA little-endian
     uint8_t pf[16] = {
-        32, 24, 0, 1,   // bits, depth, big-endian, true-color
-        0, 255, 0, 255, 0, 255, // max r/g/b
-        16, 8, 0, 0, 0, 0       // shifts + padding
+        32, 24, 0, 1,
+        0, 255, 0, 255, 0, 255,
+        16, 8, 0, 0, 0, 0
     };
     uint8_t spf[20] = {0};
     memcpy(spf + 4, pf, 16);
     send(fd, spf, 20, 0);
 
-    // SetEncodings: Raw only
     uint8_t se[8] = {2, 0, 0, 1, 0, 0, 0, 0};
     send(fd, se, 8, 0);
 
@@ -356,7 +353,7 @@ static HelionEngine *GEng;
         if (![self readn:&t n:1]) break;
         if (t == 0) [self fbUpdate];
         else if (t == 1) { uint8_t d[5]; [self readn:d n:5]; }
-        else if (t == 2) { uint8_t d[1]; [self readn:d n:1]; uint16_t nc; [self readn:&nc n:2]; nc = ntohs(nc); if (nc) { uint8_t skip[6*nc]; [self readn:skip n:6*nc]; } }
+        else if (t == 2) { uint8_t d[1]; [self readn:d n:1]; uint16_t nc; [self readn:&nc n:2]; nc = ntohs(nc); if (nc && nc < 256) { uint8_t skip[6*nc]; [self readn:skip n:6*nc]; } }
         else if (t == 3) { uint8_t d[9]; [self readn:d n:9]; }
         else break;
     }
@@ -482,9 +479,11 @@ static HelionEngine *GEng;
     __weak typeof(self) weakSelf = self;
     _screen.onStatus = ^(NSString *msg) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakSelf->_status.text = msg;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf->_status.text = msg;
             if ([msg hasPrefix:@"Connected"]) {
-                [weakSelf->_spinner stopAnimating];
+                [strongSelf->_spinner stopAnimating];
             }
         });
     };
