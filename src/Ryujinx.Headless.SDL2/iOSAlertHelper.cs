@@ -7,16 +7,16 @@ namespace Ryujinx.Headless.SDL2
 {
     public static class AlertHelper
     {
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void showKeyboardAlert(string title, string message, string placeholder);
 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void showAlert(string title, string message, bool showCancel);
 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr getKeyboardInput();
 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         private static extern void clearKeyboardInput();
 
         public static void ShowAlertWithTextInput(string title, string message, string placeholder, Action<string> onTextEntered)

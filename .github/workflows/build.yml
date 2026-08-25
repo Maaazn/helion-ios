@@ -26,14 +26,23 @@ jobs:
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
           dotnet workload install ios --skip-manifest-update || dotnet workload install ios
 
-      - name: Publish Ryujinx Headless ios-arm64
+      - name: Build IPA
         run: |
-          set -euo pipefail
-          chmod +x distribution/ios/compile.sh
-          ./distribution/ios/compile.sh
-          ls -lh "src/MeloNX/MeloNX/Dependencies/Dynamic Libraries/Ryujinx.Headless.SDL2.dylib"
+          chmod +x scripts/build-ipa.sh distribution/ios/compile.sh
+          HELION_VERSION=0.3.0 scripts/build-ipa.sh
+          test -f dist/Helion.ipa
+          python3 - <<'PY'
+          import zipfile, os
+          z=zipfile.ZipFile('dist/Helion.ipa')
+          names=z.namelist()
+          assert any(n.endswith('Helion.app/Helion') for n in names)
+          assert any('Ryujinx.Headless.SDL2.dylib' in n for n in names)
+          sz=os.path.getsize('dist/Helion.ipa')
+          print('ipa', sz)
+          assert sz > 20*1024*1024
+          PY
 
-      - name: Import p12
+      - name: Import p12 and codesign
         env:
           CERT_BASE64: ${{ secrets.IOS_SIGNING_CERTIFICATE_BASE64 }}
           CERT_PASSWORD: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -53,63 +62,22 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           IDENT=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | python3 -c 'import sys,re; t=sys.stdin.read(); m=re.search(r"\"([^\"]+)\"", t); print(m.group(1) if m else "")')
-          echo "IDENT=$IDENT" >> "$GITHUB_ENV"
           echo "identity=$IDENT"
-
-      - name: Build unsigned iphoneos
-        run: |
-          set -euo pipefail
-          set +e
-          xcodebuild \
-            -project src/MeloNX/MeloNX.xcodeproj \
-            -scheme MeloNX \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGN_ENTITLEMENTS= \
-            DEVELOPMENT_TEAM= \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            PRODUCT_BUNDLE_IDENTIFIER=com.maaazn.helion \
-            INFOPLIST_KEY_CFBundleDisplayName=Helion \
-            ONLY_ACTIVE_ARCH=YES \
-            ARCHS=arm64 \
-            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
-            build > "$RUNNER_TEMP/xcode.log" 2>&1
-          RC=$?
-          set -e
-          echo "xcodebuild rc=$RC"
-          grep -E 'error:|warning:|Undefined symbol|BUILD FAILED|BUILD SUCCEEDED|ld:' "$RUNNER_TEMP/xcode.log" | tail -80
-          tail -20 "$RUNNER_TEMP/xcode.log"
-          test "$RC" -eq 0
-
-      - name: Sign and IPA
-        run: |
-          set -euo pipefail
-          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Release-iphoneos/MeloNX.app' | head -1)
-          test -n "$APP"
-          echo "APP=$APP"
-          ls -lh "$APP"
-          ls -lh "$APP/Frameworks" 2>/dev/null | head || true
-          mkdir -p dist Payload
-          rm -rf Payload/*
-          cp -R "$APP" Payload/Helion.app
-          find Payload/Helion.app -name '*.framework' -o -name '*.dylib' -o -name '*.appex' | while read -r f; do
+          APP="$GITHUB_WORKSPACE/build/ipa/Payload/Helion.app"
+          find "$APP" -name '*.framework' -o -name '*.dylib' | while read -r f; do
             codesign --force --sign "$IDENT" --timestamp=none "$f" || true
           done
-          codesign --force --sign "$IDENT" --entitlements "$GITHUB_WORKSPACE/helion.entitlements" --generate-entitlement-der --timestamp=none Payload/Helion.app
+          codesign --force --sign "$IDENT" --entitlements "$GITHUB_WORKSPACE/host/Helion.entitlements" --generate-entitlement-der --timestamp=none "$APP"
+          mkdir -p dist
           rm -f dist/Helion.ipa
-          zip -r -y dist/Helion.ipa Payload
+          (cd "$GITHUB_WORKSPACE/build/ipa" && zip -r -y "$GITHUB_WORKSPACE/dist/Helion.ipa" Payload)
           ls -lh dist/Helion.ipa
 
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.0
-          name: Helion 0.2.0
+          tag_name: v0.3.0
+          name: Helion 0.3.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa

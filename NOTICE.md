@@ -1,9 +1,7 @@
-Helion is a fork of Ryujinx for iPhone.
+Helion iOS host is original.
 
-Ryujinx — MIT — gdkchan and contributors, continued by Ryubing.
-MeloNX — AGPL-3.0 — Stossy11 / MeloNX team (iOS host, Metal/SDL, JIT).
-MeloVertex — unofficial iOS fixes used as the starting tree.
+Engine: Ryujinx (MIT) — gdkchan / Ryubing / contributors.
+ARM64 JIT: LightningJit + ARMeilleure, with an iOS Darwin icache patch.
 
-Helion is not affiliated with those projects.
-
-This repository does not ship keys, firmware, or game dumps.
+This tree does not ship the MeloNX / MeloVertex iOS application.
+It does not ship keys, firmware, or game dumps.

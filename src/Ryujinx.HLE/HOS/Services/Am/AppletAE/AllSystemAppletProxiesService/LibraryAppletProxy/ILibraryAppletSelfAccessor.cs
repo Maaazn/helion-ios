@@ -6,7 +6,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.Lib
 {
     partial class ILibraryAppletSelfAccessor : IpcService
     {
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void TriggerCallback(string cIdentifier);
 
         private readonly AppletStandalone _appletStandalone = new();

@@ -67,7 +67,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 IntPtr funcPtr = _jitRegion.Pointer + funcOffset;
 
-                if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                if ((OperatingSystem.IsMacOS() || OperatingSystem.IsIOS()) && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
                 {
                     unsafe
                     {

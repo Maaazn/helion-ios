@@ -88,10 +88,10 @@ namespace Ryujinx.Headless.SDL2
         private static readonly TitleUpdateMetadataJsonSerializerContext _titleSerializerContext = new(JsonHelper.GetDefaultSerializerOptions());
 
                 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void TriggerCallbackWithData(string cIdentifier, IntPtr data,  UIntPtr dataLength);
 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void TriggerCallback(string cIdentifier);
 
         [UnmanagedCallersOnly(EntryPoint = "main_ryujinx_sdl")]

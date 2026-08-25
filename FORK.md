@@ -1,6 +1,8 @@
-# Upstream
+# Fork
 
-Ryujinx (desktop, MIT): C# / ARMeilleure / Vulkan-OpenGL, Avalonia UI.
-Ryubing continues that tree after the original project stopped.
-MeloNX (iOS, AGPL): same engine, NativeAOT `Ryujinx.Headless.SDL2`, Swift UI, StikDebug JIT.
-This repository is a fork of that iOS tree with our bundle id and signing.
+Source engine: Ryujinx (C# / ARMeilleure / LightningJit / Vulkan).
+iOS: NativeAOT `Ryujinx.Headless.SDL2` + Helion host.
+
+Patch:
+- LightningJit cache uses Darwin copy on iOS ARM64 (same ISA, MAP_JIT).
+- Helper callbacks go through HelionBridge, not a third-party iOS shell.

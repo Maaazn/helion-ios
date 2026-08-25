@@ -145,7 +145,7 @@ namespace Ryujinx.Input.Native
             }
         }
 
-        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("HelionBridge.framework/HelionBridge", CallingConvention = CallingConvention.Cdecl)]
         public static extern void TriggerCallbackWithData(string cIdentifier, IntPtr data, UIntPtr dataLength);
 
         public void Rumble(float lowFrequency, float highFrequency, uint durationMs)
