@@ -127,7 +127,7 @@ xcrun --sdk iphoneos clang \
   -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc -fblocks \
   -framework Foundation -framework UIKit -framework UniformTypeIdentifiers \
-  -framework GameController \
+  -framework GameController -framework CoreGraphics -framework QuartzCore \
   "$ROOT/app/Helion.m" \
   -o "$BIN"
 
