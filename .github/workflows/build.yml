@@ -32,7 +32,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=2.0.0 scripts/build-ipa.sh
+          HELION_VERSION=2.1.0 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
@@ -77,30 +77,16 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.0
-          name: Puck 2.0.0
+          tag_name: v2.1.0
+          name: Puck 2.1.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            # Puck 2.0.0 — pair + pointer
+            # Puck 2.1.0 — pointer
 
-            Back on the system-pointer path. Linux guest is gone.
+            In-app cursor you fully control. Home Screen pointer is AssistiveTouch (turn Always Show Menu off).
 
-            ## Pair (iOS 27 Developer Mode)
-
-            Puck advertises itself as a pairable computer (`_remotepairing-pairable-host._tcp`) — the same wireless pairing path SideInstaller and StikPair use.
-
-            1. Open Puck → Pair
-            2. Allow Local Network
-            3. Settings → Privacy & Security → Developer Mode → Pair with Puck
-            4. Type the 6-digit PIN
-            5. Export or keep the pairing record on the phone
-
-            Pairing is Apple’s developer pairing. It is not a jailbreak and it does not hide AssistiveTouch.
-
-            ## Pointer
-
-            In-app cursor (Mac / Win / Puck / file). Home Screen pointer is AssistiveTouch — turn it on once, turn Always Show Menu off.
+            Pairing is not in this build. A pairing file does not grant a system mouse. USB/Bluetooth HID + AssistiveTouch is the system pointer.
 
             Sideload `Helion.ipa` (display name **Puck**, bundle `com.maaazn.helion`).

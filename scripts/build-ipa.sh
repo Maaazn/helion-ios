@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
-VER="${HELION_VERSION:-2.0.0}"
+VER="${HELION_VERSION:-2.1.0}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 DIST="${HELION_DIST:-$ROOT/dist}"

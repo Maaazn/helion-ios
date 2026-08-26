@@ -418,6 +418,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 
     _pairBtn = [self mintBtn:PuckS(@"Pair", @"اقتران") action:@selector(openPair) ghost:YES];
     _pairBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    _pairBtn.hidden = YES;
     [self.view addSubview:_pairBtn];
 
     _sub = [UILabel new];
@@ -705,7 +706,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    _pairBtn.hidden = NO;
+    _pairBtn.hidden = YES;
     _pos = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2);
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
