@@ -32,7 +32,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=3.2.4 scripts/build-ipa.sh
+          HELION_VERSION=4.3.5 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
@@ -77,20 +77,18 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.2.4
-          name: Puck 3.2.4
+          tag_name: v4.3.5
+          name: Puck 4.3.5
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            # Puck 3.2.4
+            # Puck 4.3.5
 
-            Pair as a computer (iOS Developer Mode). Then wear any pointer you want inside Puck.
+            Pair as a computer, then UIPointerStyle morphs the real system pointer (iOS 13.4 API — Mac / Linux / cross / custom file).
 
-            1. Open Puck
-            2. Start pairing — allow Local Network
-            3. Settings → Privacy & Security → Developer Mode → Pair with Puck
-            4. Enter the PIN
-            5. The studio opens. Any image is a cursor.
+            1. Pair in Developer Mode
+            2. Connect a mouse
+            3. Pick a shape — Apple’s compositor draws it
 
             Sideload `Helion.ipa` (display name **Puck**, bundle `com.maaazn.helion`).

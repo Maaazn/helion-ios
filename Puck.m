@@ -1,5 +1,5 @@
-// Puck 3.2.4 — Developer Mode pairing unlocks the pointer studio.
-// Pairing gives a computer identity. The custom cursor lives inside Puck.
+// Puck 4.3.5 — UIPointerStyle morphs the real system pointer (iOS 13.4+).
+// Pairing is the computer identity. Pointer chrome is Apple's compositor via UIPointerShape.
 
 
 #import <UIKit/UIKit.h>
@@ -468,7 +468,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     bar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:bar];
 
-    UIStackView *shapes = [self chipRow:@[@"Mac", @"Win", @"Puck", @"Cross", @"File"] action:@selector(pickShape:)];
+    UIStackView *shapes = [self chipRow:@[@"Mac", @"Win", @"Linux", @"Cross", @"File"] action:@selector(pickShape:)];
     _shapeBtns = shapes.arrangedSubviews;
     shapes.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:shapes];
@@ -694,7 +694,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     else if (_shape == PuckShapeFile) _cursor.tip = CGPointMake(0.12, 0.08);
     else _cursor.tip = CGPointMake(0.5, 0.5);
 }
-- (BOOL)prefersPointerLocked { return YES; }
+- (BOOL)prefersPointerLocked { return NO; }
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
@@ -704,13 +704,54 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
     [self refreshDevice];
+    [self bumpPointer];
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self placeCursor]; }
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
-    return [UIPointerRegion regionWithRect:self.view.bounds identifier:@"full"];
+    NSString *ident = [NSString stringWithFormat:@"puck-%ld-%.2f-%d", (long)_shape, (double)_scale, _shown ? 1 : 0];
+    return [UIPointerRegion regionWithRect:self.view.bounds identifier:ident];
 }
 - (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region API_AVAILABLE(ios(13.4)) {
-    return [UIPointerStyle hiddenPointerStyle];
+    if (!_shown) return [UIPointerStyle hiddenPointerStyle];
+    if (_shape == PuckShapeFile && _cursor.custom) return [UIPointerStyle hiddenPointerStyle];
+    UIBezierPath *path = [self puckPointerPath];
+    if (!path) return nil;
+    return [UIPointerStyle styleWithShape:[UIPointerShape path:path] constrainedAxes:0];
+}
+- (UIBezierPath *)puckPointerPath {
+    CGFloat s = 16.0 * MAX(0.55, MIN(_scale, 3.2));
+    UIBezierPath *p = [UIBezierPath bezierPath];
+    if (_shape == PuckShapeCross) {
+        CGFloat t = MAX(1.2, s * 0.08);
+        [p appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(-s, -t, s * 2, t * 2)]];
+        [p appendPath:[UIBezierPath bezierPathWithRect:CGRectMake(-t, -s, t * 2, s * 2)]];
+        return p;
+    }
+    if (_shape == PuckShapePuck) {
+        return [UIBezierPath bezierPathWithOvalInRect:CGRectMake(-s * 0.42, -s * 0.42, s * 0.84, s * 0.84)];
+    }
+    [p moveToPoint:CGPointMake(0, 0)];
+    [p addLineToPoint:CGPointMake(0, s * 1.18)];
+    [p addLineToPoint:CGPointMake(s * 0.30, s * 0.88)];
+    [p addLineToPoint:CGPointMake(s * 0.52, s * 1.38)];
+    [p addLineToPoint:CGPointMake(s * 0.72, s * 1.28)];
+    [p addLineToPoint:CGPointMake(s * 0.50, s * 0.78)];
+    [p addLineToPoint:CGPointMake(s * 0.98, s * 0.78)];
+    [p closePath];
+    return p;
+}
+- (void)bumpPointer {
+    if (@available(iOS 13.4, *)) {
+        NSArray *all = [self.view.interactions copy];
+        for (id i in all) {
+            if ([i isKindOfClass:[UIPointerInteraction class]]) {
+                [self.view removeInteraction:i];
+                [self.view addInteraction:i];
+            }
+        }
+    }
+    BOOL overlay = _shown && _shape == PuckShapeFile && _cursor.custom != nil;
+    _cursor.hidden = !overlay;
 }
 - (void)bindMouse:(GCMouse *)mouse {
     if (![mouse isKindOfClass:[GCMouse class]]) return;
@@ -749,27 +790,27 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         BOOL busy = [st hasPrefix:@"click"] || [st hasPrefix:@"hit"] || [st hasPrefix:@"scroll"]
             || [st hasPrefix:@"Hover"] || [st hasPrefix:@"تمرير"];
         if (!busy) _status.text = [self idleStatus];
-        _cursor.hidden = !_shown;
+        [self bumpPointer];
     } else {
         _device.text = PuckS(@"No mouse", @"ما في ماوس");
         _device.textColor = Dim();
         _status.text = PuckS(@"Plug a mouse", @"وصّل ماوس");
     }
     if (want && live) {
-        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
-                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
+        _sub.text = PuckS(@"UIPointerStyle — the real system pointer.",
+                          @"UIPointerStyle — مؤشر النظام نفسه.");
         [_enableBtn setTitle:PuckS(@"On · Home Screen · stays on", @"شغال · الشاشة الرئيسية · يبقى") forState:UIControlStateNormal];
         _enableBtn.alpha = 1;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"system LIVE", @"system LIVE")];
     } else if (want) {
-        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
-                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
+        _sub.text = PuckS(@"UIPointerStyle — the real system pointer.",
+                          @"UIPointerStyle — مؤشر النظام نفسه.");
         [_enableBtn setTitle:PuckS(@"Enable on iPhone", @"تفعيل على الآيفون") forState:UIControlStateNormal];
         _enableBtn.alpha = 1;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"visual only", @"visual only")];
     } else {
-        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
-                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
+        _sub.text = PuckS(@"UIPointerStyle — the real system pointer.",
+                          @"UIPointerStyle — مؤشر النظام نفسه.");
         [_enableBtn setTitle:PuckS(@"System pointer is off", @"مؤشر النظام طافي") forState:UIControlStateNormal];
         _enableBtn.alpha = 0.55;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"in-app", @"in-app")];
@@ -785,7 +826,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [self drip];
         _status.text = PuckS(@"Hover", @"تمرير");
         _coords.text = [NSString stringWithFormat:@"%.0f  ×  %.0f", _pos.x, _pos.y];
-        if (_shown) _cursor.hidden = NO;
+        [self bumpPointer];
         if (first) {
             [self refreshDevice];
             [self maybeFinishSetup];
@@ -801,7 +842,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _pos.y = MAX(in.top+8, MIN(b.size.height-in.bottom-8, _pos.y));
     [self placeCursor];
     _coords.text = [NSString stringWithFormat:@"%.0f  ×  %.0f", _pos.x, _pos.y];
-    if (_shown) _cursor.hidden = NO;
+    [self bumpPointer];
     [self drip];
     _status.text = [self idleStatus];
 }
@@ -837,8 +878,8 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)rightClick { _status.text = @"right click"; }
 - (void)note:(NSString *)s { _status.text = s; }
 - (void)targetTap:(UIButton *)b { _status.text = [NSString stringWithFormat:@"hit  %@", b.currentTitle]; }
-- (void)toggleVisible { _shown = _visible.on; _cursor.hidden = !_shown; }
-- (void)sizeChanged { _scale = _size.value; [self placeCursor]; }
+- (void)toggleVisible { _shown = _visible.on; [self bumpPointer]; }
+- (void)sizeChanged { _scale = _size.value; [self placeCursor]; [self bumpPointer]; }
 - (void)speedChanged { _accel = _speed.value; }
 - (void)pickShape:(UIButton *)b {
     _shape = (PuckShape)b.tag;
@@ -848,6 +889,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [_cursor setNeedsDisplay];
     [self placeCursor];
     [self markChips];
+    [self bumpPointer];
 }
 - (void)pickDesk:(UIButton *)b {
     _desk = (PuckDesk)b.tag;
@@ -893,6 +935,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [self placeCursor];
         [self markChips];
         _status.text = @"cursor file loaded";
+        [self bumpPointer];
     } else {
         _stage.photo = img;
         _desk = PuckDeskPhoto;

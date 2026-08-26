@@ -70,7 +70,7 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     self.view.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
 
     UILabel *kicker = [UILabel new];
-    kicker.text = @"PUCK  3.2.4";
+    kicker.text = @"PUCK  4.3.5";
     kicker.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightMedium];
     kicker.textColor = PDim();
     kicker.translatesAutoresizingMaskIntoConstraints = NO;
