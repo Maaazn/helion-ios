@@ -716,7 +716,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     if (_shape == PuckShapeFile && _cursor.custom) return [UIPointerStyle hiddenPointerStyle];
     UIBezierPath *path = [self puckPointerPath];
     if (!path) return nil;
-    return [UIPointerStyle styleWithShape:[UIPointerShape path:path] constrainedAxes:0];
+    return [UIPointerStyle styleWithShape:[UIPointerShape shapeWithPath:path] constrainedAxes:0];
 }
 - (UIBezierPath *)puckPointerPath {
     CGFloat s = 16.0 * MAX(0.55, MIN(_scale, 3.2));
