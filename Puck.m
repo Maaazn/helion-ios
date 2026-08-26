@@ -1,6 +1,5 @@
-// Puck 2.0.0 — system pointer + iOS 27 Developer Mode pairing.
-// Pairing: the phone treats Puck as a trusted computer (RPPairing pairable host).
-// Home Screen pointer is AssistiveTouch. Pairing does not hide that overlay.
+// Puck 3.2.4 — Developer Mode pairing unlocks the pointer studio.
+// Pairing gives a computer identity. The custom cursor lives inside Puck.
 
 
 #import <UIKit/UIKit.h>
@@ -18,10 +17,10 @@ typedef NS_ENUM(NSInteger, PuckDesk)  { PuckDeskVoid = 0, PuckDeskGrid, PuckDesk
 
 static NSString *const kPuckSystemKey = @"puck.systemPointer";
 
-static UIColor *Ink(void)   { return [UIColor colorWithRed:0.04 green:0.045 blue:0.06 alpha:1]; }
-static UIColor *Mint(void)  { return [UIColor colorWithRed:0.49 green:1.00 blue:0.80 alpha:1]; }
-static UIColor *Pearl(void) { return [UIColor colorWithRed:0.96 green:0.97 blue:0.98 alpha:1]; }
-static UIColor *Card(void)  { return [UIColor colorWithRed:0.10 green:0.11 blue:0.14 alpha:1]; }
+static UIColor *Ink(void)   { return [UIColor colorWithRed:0.035 green:0.035 blue:0.043 alpha:1]; }
+static UIColor *Mint(void)  { return [UIColor colorWithRed:0.831 green:0.831 blue:0.847 alpha:1]; }
+static UIColor *Pearl(void) { return [UIColor colorWithRed:0.957 green:0.957 blue:0.961 alpha:1]; }
+static UIColor *Card(void)  { return [UIColor colorWithRed:0.071 green:0.071 blue:0.078 alpha:1]; }
 static UIColor *Dim(void)   { return [UIColor colorWithWhite:0.55 alpha:1]; }
 
 static BOOL PuckWantSystem(void) {
@@ -411,19 +410,18 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 
     UILabel *title = [UILabel new];
     title.text = @"PUCK";
-    title.font = [UIFont systemFontOfSize:32 weight:UIFontWeightBlack];
+    title.font = [UIFont systemFontOfSize:22 weight:UIFontWeightSemibold];
     title.textColor = Pearl();
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
-    _pairBtn = [self mintBtn:PuckS(@"Pair", @"اقتران") action:@selector(openPair) ghost:YES];
+    _pairBtn = [self mintBtn:PuckS(@"Computer", @"كمبيوتر") action:@selector(openPair) ghost:YES];
     _pairBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    _pairBtn.hidden = YES;
     [self.view addSubview:_pairBtn];
 
     _sub = [UILabel new];
-    _sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    _sub.textColor = Mint();
+    _sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    _sub.textColor = Dim();
     _sub.numberOfLines = 2;
     _sub.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_sub];
@@ -436,9 +434,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [self.view addSubview:_device];
 
     _stage = [PuckDeskView new];
-    _stage.layer.cornerRadius = 22;
+    _stage.layer.cornerRadius = 16;
     _stage.layer.borderWidth = 1;
-    _stage.layer.borderColor = [Mint() colorWithAlphaComponent:0.18].CGColor;
+    _stage.layer.borderColor = [Pearl() colorWithAlphaComponent:0.12].CGColor;
     _stage.clipsToBounds = YES;
     _stage.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_stage];
@@ -446,18 +444,6 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     UIHoverGestureRecognizer *hover = [[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(hover:)];
     [self.view addGestureRecognizer:hover];
     [self.view addInteraction:[[UIPointerInteraction alloc] initWithDelegate:self]];
-
-    for (int i = 0; i < 3; i++) {
-        UIButton *t = [UIButton buttonWithType:UIButtonTypeSystem];
-        [t setTitle:@[@"Click", @"Hold", @"Hover"][i] forState:UIControlStateNormal];
-        [t setTitleColor:Ink() forState:UIControlStateNormal];
-        t.backgroundColor = Mint();
-        t.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-        t.layer.cornerRadius = 14;
-        t.frame = CGRectMake(18 + i * 100, 18, 88, 44);
-        [t addTarget:self action:@selector(targetTap:) forControlEvents:UIControlEventTouchUpInside];
-        [_stage addSubview:t];
-    }
 
     _status = [UILabel new];
     _status.text = PuckS(@"Move the mouse", @"حرّك الماوس");
@@ -492,7 +478,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     desks.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:desks];
 
-    UIButton *loadC = [self mintBtn:PuckS(@"Cursor file  (.cur / .png)", @"ملف المؤشر  (.cur / .png)") action:@selector(loadCursor)];
+    UIButton *loadC = [self mintBtn:PuckS(@"Any cursor image", @"أي صورة مؤشر") action:@selector(loadCursor)];
     UIButton *loadW = [self mintBtn:PuckS(@"Wallpaper", @"خلفية") action:@selector(loadWall) ghost:YES];
     loadC.translatesAutoresizingMaskIntoConstraints = NO;
     loadW.translatesAutoresizingMaskIntoConstraints = NO;
@@ -516,10 +502,12 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     sysL.text = PuckS(@"System pointer · stays on", @"مؤشر النظام · يبقى شغال");
     sysL.textColor = Pearl();
     sysL.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    sysL.hidden = YES;
     sysL.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:sysL];
     _system = [UISwitch new];
-    _system.on = PuckWantSystem();
+    _system.on = NO;
+    _system.hidden = YES;
     _system.onTintColor = Mint();
     [_system addTarget:self action:@selector(toggleSystem) forControlEvents:UIControlEventValueChanged];
     _system.translatesAutoresizingMaskIntoConstraints = NO;
@@ -549,14 +537,16 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     _speed.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_speed];
 
-    _enableBtn = [self mintBtn:PuckS(@"Enable on iPhone", @"تفعيل على الآيفون") action:@selector(openSetup)];
+    _enableBtn = [self mintBtn:PuckS(@"Studio", @"الاستوديو") action:@selector(openSetup)];
     _enableBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    _enableBtn.hidden = YES;
     [bar addSubview:_enableBtn];
 
     _sysNote = [UILabel new];
     _sysNote.textColor = Dim();
     _sysNote.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     _sysNote.numberOfLines = 2;
+    _sysNote.hidden = YES;
     _sysNote.translatesAutoresizingMaskIntoConstraints = NO;
     [bar addSubview:_sysNote];
 
@@ -704,19 +694,16 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     else if (_shape == PuckShapeFile) _cursor.tip = CGPointMake(0.12, 0.08);
     else _cursor.tip = CGPointMake(0.5, 0.5);
 }
+- (BOOL)prefersPointerLocked { return YES; }
+- (BOOL)prefersStatusBarHidden { return YES; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
+- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    _pairBtn.hidden = YES;
     _pos = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2);
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
     [self refreshDevice];
-    if (PuckWantSystem()) {
-        PuckNudgeAssistiveTouch();
-        if (!PuckSystemLive(_sawHover)) [self openSetup];
-        else [self maybeFinishSetup];
-        [self startWatch];
-    }
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self placeCursor]; }
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
@@ -769,19 +756,20 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         _status.text = PuckS(@"Plug a mouse", @"وصّل ماوس");
     }
     if (want && live) {
-        _sub.text = PuckS(@"System pointer on. Home Screen too. Stays on.",
-                          @"مؤشر النظام شغال. الشاشة الرئيسية بعد. يبقى.");
+        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
+                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
         [_enableBtn setTitle:PuckS(@"On · Home Screen · stays on", @"شغال · الشاشة الرئيسية · يبقى") forState:UIControlStateNormal];
         _enableBtn.alpha = 1;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"system LIVE", @"system LIVE")];
     } else if (want) {
-        _sub.text = PuckS(@"Turn AssistiveTouch on once — then it stays.",
-                          @"فعّل اللمس المساعد مرة واحدة — بعدها يبقى.");
+        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
+                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
         [_enableBtn setTitle:PuckS(@"Enable on iPhone", @"تفعيل على الآيفون") forState:UIControlStateNormal];
         _enableBtn.alpha = 1;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"visual only", @"visual only")];
     } else {
-        _sub.text = PuckS(@"Your pointer. Visual only.", @"مؤشّرك. داخل التطبيق فقط.");
+        _sub.text = PuckS(@"Paired as a computer. Wear any pointer.",
+                          @"مقترن ككمبيوتر. المؤشر بأي شكل تريده.");
         [_enableBtn setTitle:PuckS(@"System pointer is off", @"مؤشر النظام طافي") forState:UIControlStateNormal];
         _enableBtn.alpha = 0.55;
         _sysNote.text = [NSString stringWithFormat:@"%@ · %@", PuckHIDDump(), PuckS(@"in-app", @"in-app")];
@@ -1268,7 +1256,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)opts {
     if (![scene isKindOfClass:[UIWindowScene class]]) return;
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-    self.window.rootViewController = [PuckHome new];
+    self.window.rootViewController = [[NSUserDefaults standardUserDefaults] boolForKey:@"puck.paired"]
+        ? [PuckHome new]
+        : [PuckPair new];
     self.window.backgroundColor = Ink();
     [self.window makeKeyAndVisible];
 }

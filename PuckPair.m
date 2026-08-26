@@ -6,15 +6,18 @@
 #import <sys/socket.h>
 #import <os/log.h>
 
+@interface PuckHome : UIViewController
+@end
+
 #if __has_include("puck_pair.h")
 #import "puck_pair.h"
 #define PUCK_PAIR_LIB 1
 #endif
 
-static UIColor *PInk(void)   { return [UIColor colorWithRed:0.04 green:0.045 blue:0.06 alpha:1]; }
-static UIColor *PMint(void)  { return [UIColor colorWithRed:0.49 green:1.00 blue:0.80 alpha:1]; }
-static UIColor *PPearl(void) { return [UIColor colorWithRed:0.96 green:0.97 blue:0.98 alpha:1]; }
-static UIColor *PCard(void)  { return [UIColor colorWithRed:0.10 green:0.11 blue:0.14 alpha:1]; }
+static UIColor *PInk(void)   { return [UIColor colorWithRed:0.035 green:0.035 blue:0.043 alpha:1]; }
+static UIColor *PMint(void)  { return [UIColor colorWithRed:0.831 green:0.831 blue:0.847 alpha:1]; }
+static UIColor *PPearl(void) { return [UIColor colorWithRed:0.957 green:0.957 blue:0.961 alpha:1]; }
+static UIColor *PCard(void)  { return [UIColor colorWithRed:0.071 green:0.071 blue:0.078 alpha:1]; }
 static UIColor *PDim(void)   { return [UIColor colorWithWhite:0.55 alpha:1]; }
 
 static BOOL PIsAR(void) {
@@ -58,7 +61,7 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     BOOL _paired;
 }
 
-- (BOOL)prefersStatusBarHidden { return NO; }
+- (BOOL)prefersStatusBarHidden { return YES; }
 - (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
 
 - (void)viewDidLoad {
@@ -66,27 +69,27 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     self.view.backgroundColor = PInk();
     self.view.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
 
-    UIButton *back = [UIButton buttonWithType:UIButtonTypeSystem];
-    [back setTitle:PS(@"Pointer", @"المؤشر") forState:UIControlStateNormal];
-    [back setTitleColor:PMint() forState:UIControlStateNormal];
-    back.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    back.translatesAutoresizingMaskIntoConstraints = NO;
-    [back addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:back];
+    UILabel *kicker = [UILabel new];
+    kicker.text = @"PUCK  3.2.4";
+    kicker.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightMedium];
+    kicker.textColor = PDim();
+    kicker.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:kicker];
 
     UILabel *title = [UILabel new];
-    title.text = @"PUCK PAIR";
-    title.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBlack];
+    title.text = PS(@"Pair as a computer.", @"اقترن ككمبيوتر.");
+    title.font = [UIFont systemFontOfSize:34 weight:UIFontWeightSemibold];
     title.textColor = PPearl();
+    title.numberOfLines = 2;
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
     UILabel *sub = [UILabel new];
     sub.numberOfLines = 0;
-    sub.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    sub.textColor = PMint();
-    sub.text = PS(@"This phone treats Puck as a trusted computer. iOS 27 Developer Mode pairing — same path as SideInstaller / StikPair.",
-                  @"الآيفون يعامل Puck ككمبيوتر موثوق. اقتران نمط المطوّر في iOS 27 — نفس مسار SideInstaller و StikPair.");
+    sub.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
+    sub.textColor = PDim();
+    sub.text = PS(@"Developer Mode. Six digits. Then Puck is a trusted computer and you wear any pointer you want.",
+                  @"نمط المطوّر. ستة أرقام. بعدها Puck كمبيوتر موثوق، وأنت تختار شكل المؤشر.");
     sub.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:sub];
 
@@ -126,12 +129,11 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
 
     _start = [self btn:PS(@"Start pairing", @"ابدأ الاقتران") mint:YES action:@selector(startPair)];
     _settings = [self btn:PS(@"Open Developer Mode", @"فتح نمط المطوّر") mint:NO action:@selector(openDev)];
-    UIButton *imp = [self btn:PS(@"Import pairing file", @"استيراد ملف الاقتران") mint:NO action:@selector(importFile)];
-    _export = [self btn:PS(@"Export pairing file", @"تصدير ملف الاقتران") mint:NO action:@selector(exportFile)];
+    _export = [self btn:PS(@"Open the studio", @"افتح الاستوديو") mint:NO action:@selector(enterStudio)];
     _export.enabled = NO;
     _export.alpha = 0.45;
 
-    UIStackView *col = [[UIStackView alloc] initWithArrangedSubviews:@[_start, _settings, imp, _export]];
+    UIStackView *col = [[UIStackView alloc] initWithArrangedSubviews:@[_start, _settings, _export]];
     col.axis = UILayoutConstraintAxisVertical;
     col.spacing = 8;
     col.translatesAutoresizingMaskIntoConstraints = NO;
@@ -149,17 +151,16 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     note.numberOfLines = 0;
     note.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
     note.textColor = PDim();
-    note.text = PS(@"Pairing does not hide AssistiveTouch. The Home Screen pointer is still AssistiveTouch. Pairing gives this app a computer identity and the pairing record for your device.",
-                   @"الاقتران لا يخفي اللمس المساعد. مؤشر الشاشة الرئيسية يبقى AssistiveTouch. الاقتران يعطي التطبيق هوية كمبيوتر وملف الاقتران لجهازك.");
+    note.text = PS(@"Pairing is Apple’s Developer Mode computer identity. Inside Puck you wear any pointer.",
+                   @"الاقتران هوية كمبيوتر عبر نمط المطوّر. داخل Puck المؤشر بأي شكل تختاره.");
     note.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:note];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [back.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
-        [back.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [back.heightAnchor constraintEqualToConstant:44],
-        [title.topAnchor constraintEqualToAnchor:back.bottomAnchor constant:4],
+        [kicker.topAnchor constraintEqualToAnchor:g.topAnchor constant:14],
+        [kicker.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
+        [title.topAnchor constraintEqualToAnchor:kicker.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
         [title.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [sub.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:6],
@@ -198,13 +199,13 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     b.translatesAutoresizingMaskIntoConstraints = NO;
     [b.heightAnchor constraintEqualToConstant:46].active = YES;
     if (mint) {
-        b.backgroundColor = PMint();
+        b.backgroundColor = PPearl();
         [b setTitleColor:PInk() forState:UIControlStateNormal];
     } else {
         b.backgroundColor = PCard();
         b.layer.borderWidth = 1;
-        b.layer.borderColor = [PMint() colorWithAlphaComponent:0.22].CGColor;
-        [b setTitleColor:PMint() forState:UIControlStateNormal];
+        b.layer.borderColor = [PPearl() colorWithAlphaComponent:0.14].CGColor;
+        [b setTitleColor:PPearl() forState:UIControlStateNormal];
     }
     [b addTarget:self action:s forControlEvents:UIControlEventTouchUpInside];
     return b;
@@ -230,7 +231,14 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     return s;
 }
 
-- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)enterStudio {
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"puck.paired"];
+    [NSUserDefaults.standardUserDefaults synchronize];
+    UIWindow *w = self.view.window;
+    if (w) w.rootViewController = [PuckHome new];
+}
+
+- (void)close { [self enterStudio]; }
 
 - (void)openDev {
     POpenPrefs(@[
@@ -260,6 +268,8 @@ static void POpenPrefs(NSArray<NSString *> *urls) {
     _running = YES;
     _paired = NO;
     [_start setTitle:PS(@"Listening…", @"يستمع…") forState:UIControlStateNormal];
+    _export.enabled = YES;
+    _export.alpha = 1;
     _status.text = PS(@"Allow Local Network. Then Settings → Privacy & Security → Developer Mode → Pair with Puck.",
                       @"اسمح بالشبكة المحلية. ثم الإعدادات ← الخصوصية والأمن ← نمط المطوّر ← الاقتران مع Puck.");
     [self keepAlive];
@@ -397,13 +407,8 @@ static void PuckDone(int32_t ok, const char *error, const char *path, const char
             if ([obj isKindOfClass:[NSDictionary class]]) _record = obj;
         }
     }
-    _export.enabled = YES;
-    _export.alpha = 1;
-    [_start setTitle:PS(@"Paired", @"مقترن") forState:UIControlStateNormal];
-    _status.text = PS(@"Paired. Export the file for StikDebug / SideStore if you need it.",
-                      @"تم الاقتران. صدّر الملف لـ StikDebug أو SideStore إن احتجته.");
-    _info.text = [self deviceCard];
     (void)udid;
+    [self enterStudio];
 }
 
 - (void)fail:(NSString *)why {

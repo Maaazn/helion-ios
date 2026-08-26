@@ -32,7 +32,7 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=2.1.0 scripts/build-ipa.sh
+          HELION_VERSION=3.2.4 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
@@ -77,16 +77,20 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.0
-          name: Puck 2.1.0
+          tag_name: v3.2.4
+          name: Puck 3.2.4
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            # Puck 2.1.0 — pointer
+            # Puck 3.2.4
 
-            In-app cursor you fully control. Home Screen pointer is AssistiveTouch (turn Always Show Menu off).
+            Pair as a computer (iOS Developer Mode). Then wear any pointer you want inside Puck.
 
-            Pairing is not in this build. A pairing file does not grant a system mouse. USB/Bluetooth HID + AssistiveTouch is the system pointer.
+            1. Open Puck
+            2. Start pairing — allow Local Network
+            3. Settings → Privacy & Security → Developer Mode → Pair with Puck
+            4. Enter the PIN
+            5. The studio opens. Any image is a cursor.
 
             Sideload `Helion.ipa` (display name **Puck**, bundle `com.maaazn.helion`).

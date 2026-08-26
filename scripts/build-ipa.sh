@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
-VER="${HELION_VERSION:-2.1.0}"
+VER="${HELION_VERSION:-3.2.4}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 DIST="${HELION_DIST:-$ROOT/dist}"
@@ -97,52 +97,33 @@ cat > "$APP/Info.plist" <<PLIST
 PLIST
 
 python3 - "$APP/AppIcon1024x1024.png" <<'PY'
-import struct, zlib, math, sys
+import struct, zlib, sys
 w=h=1024
 def chunk(tag, data):
     return struct.pack('>I', len(data))+tag+data+struct.pack('>I', zlib.crc32(tag+data)&0xffffffff)
+# White Mac-style arrow on near-black — the product is the pointer.
 rows=[]
 for y in range(h):
     row=bytearray([0])
     for x in range(w):
-        # ink field
-        R,G,B=10,12,16
-        # mouse body (capsule)
-        mx,my=512,430
-        dx,dy=(x-mx)/180.0,(y-my)/260.0
-        body=dx*dx+dy*dy
-        if body<1:
-            shade=int(28+40*(1-body))
-            R,G,B=shade, shade+4, shade+10
-        # left/right buttons split
-        if body<0.72 and y<430:
-            if x<512: R,G,B=36,40,50
-            else: R,G,B=42,46,58
-        # scroll wheel
-        if abs(x-512)<18 and abs(y-400)<36:
-            R,G,B=18,22,28
-        # mint puck pointer (the missing iPhone cursor)
-        px,py=700,300
-        pr=math.hypot(x-px,y-py)
-        if pr<78:
-            t=max(0,1-pr/78)
-            glow=int(80*t)
-            R=min(255,R+int(120*t)); G=min(255,G+int(255*t)); B=min(255,B+int(200*t))
-            if 52<pr<64:
-                R,G,B=125,255,204
-            if pr<22:
-                R,G,B=240,255,248
-        # beam from mouse to puck
-        # line from (560,360) to (700,300)
-        ax,ay,bx,by=560,360,700,300
-        vx,vy=bx-ax,by-ay
-        llen=math.hypot(vx,vy) or 1
-        t=((x-ax)*vx+(y-ay)*vy)/(llen*llen)
-        if 0<=t<=1:
-            qx,qy=ax+t*vx,ay+t*vy
-            d=math.hypot(x-qx,y-qy)
-            if d<6:
-                R=min(255,R+90); G=min(255,G+160); B=min(255,B+120)
+        R,G,B=9,9,11
+        # rounded-square safe glyph, arrow pointing up-left from center
+        # arrow polygon roughly matching favicon
+        # scale favicon 32x32 path to 1024: *32, offset
+        px = x / 32.0
+        py = y / 32.0
+        # path: M8 6 L8 24.2 L13.1 19.4 L16.8 27.2 L20.4 25.6 L16.8 17.9 L24 17.9 Z
+        # point-in-polygon
+        poly=[(8,6),(8,24.2),(13.1,19.4),(16.8,27.2),(20.4,25.6),(16.8,17.9),(24,17.9)]
+        n=len(poly); inside=False
+        j=n-1
+        for i in range(n):
+            xi,yi=poly[i]; xj,yj=poly[j]
+            if ((yi>py)!=(yj>py)) and (px < (xj-xi)*(py-yi)/((yj-yi) or 1e-9)+xi):
+                inside=not inside
+            j=i
+        if inside:
+            R,G,B=244,244,245
         row += bytes([R,G,B])
     rows.append(bytes(row))
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR', struct.pack('>IIBBBBB', w,h,8,2,0,0,0))
