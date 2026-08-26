@@ -19,7 +19,7 @@ body{position:relative}
 #peek .row{display:flex;gap:8px}
 .btn{height:44px;min-width:44px;border:0;border-radius:8px;background:var(--elev);color:var(--fg);padding:0 12px;font-weight:600;font-size:12px}
 #splash,#boot{position:absolute;inset:0;z-index:10;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center}
-#boot{inset:auto 0 auto 0;top:40px;justify-content:flex-start;padding:12px}
+#boot{inset:12px auto auto 12px;top:12px;left:12px;right:auto;justify-content:flex-start;padding:0;align-items:flex-start}
 #splash h1,#boot h1{margin:0;font-size:22px;letter-spacing:.12em;font-weight:650}
 #splash .sub{margin-top:8px;color:var(--accent);font:12px ui-monospace,Menlo,monospace}
 .bar{height:4px;width:12rem;background:var(--elev);border-radius:2px;margin-top:20px;overflow:hidden}
@@ -41,18 +41,18 @@ body{position:relative}
   <p>PUCK LINUX IN</p>
   <div class="row">
     <button class="btn" id="bLic" type="button">تراخيص</button>
+    <button class="btn" id="bPtr" type="button">مؤشر</button>
     <button class="btn" id="bRe" type="button">إعادة</button>
   </div>
 </div>
 <div id="splash">
   <h1>PUCK LINUX IN</h1>
-  <div class="sub">kernel 6.12.11-tinycore</div>
+  <div class="sub">Linux 6.13.7-arch1 · i686</div>
   <div class="bar"><i id="prog"></i></div>
 </div>
 <div id="boot" style="display:none">
-  <div class="card">
-    <h1 style="font-size:12px;letter-spacing:.06em;color:var(--accent);font-family:ui-monospace,Menlo,monospace">PUCK LINUX IN · Tiny Core 16</h1>
-    <div class="bar"><i style="width:100%"></i></div>
+  <div class="card" style="width:auto;padding:6px 10px">
+    <h1 style="font-size:10px;letter-spacing:.08em;color:var(--accent);font-family:ui-monospace,Menlo,monospace;margin:0">PUCK LINUX IN</h1>
   </div>
 </div>
 <div id="sheet" class="puck-sheet">
@@ -75,7 +75,6 @@ if (typeof window.setImmediate !== "function") {
   var sheet = document.getElementById("sheet");
   var panel = document.getElementById("panel");
   var emu = null;
-  var serialBuf = "";
   var startedX = false;
   var lastLock = 0;
   var peekTimer = 0;
@@ -87,11 +86,12 @@ if (typeof window.setImmediate !== "function") {
     var c = screenEl.querySelector("canvas");
     if (c) c.style.cursor = "none";
   }
-  function nativeLock() {
+  function nativeMsg(msg) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.puck) {
-      window.webkit.messageHandlers.puck.postMessage("lock");
+      window.webkit.messageHandlers.puck.postMessage(msg);
     }
   }
+  function nativeLock() { nativeMsg("lock"); }
   function isChrome(t) {
     return t && t.closest && t.closest("button, a, .puck-sheet, #peek, #sheet");
   }
@@ -113,15 +113,55 @@ if (typeof window.setImmediate !== "function") {
     var canvas = screenEl.querySelector("canvas");
     try {
       if (canvas && canvas.requestPointerLock) {
-        var r = canvas.requestPointerLock();
+        var r = canvas.requestPointerLock({ unadjustedMovement: true });
         if (r && r.catch) r.catch(function () {});
       }
+    } catch (err2) {
+      try {
+        if (canvas && canvas.requestPointerLock) {
+          var r2 = canvas.requestPointerLock();
+          if (r2 && r2.catch) r2.catch(function () {});
+        }
+      } catch (err3) {}
+    }
+  }
+  function canvasLooksLikeDesktop() {
+    var canvas = screenEl.querySelector("canvas");
+    if (!canvas || canvas.style.display === "none") return false;
+    if (canvas.width < 320 || canvas.height < 200) return false;
+    try {
+      var ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      var w = canvas.width, h = canvas.height;
+      var data = ctx.getImageData(0, 0, w, h).data;
+      var step = 16, non = 0, total = 0;
+      for (var y = 0; y < h; y += step) {
+        for (var x = 0; x < w; x += step) {
+          var i = (y * w + x) * 4;
+          total++;
+          if (data[i] + data[i + 1] + data[i + 2] > 40) non++;
+        }
+      }
+      return total > 0 && non / total > 0.08;
+    } catch (e) { return false; }
+  }
+  function tryStartX(force) {
+    if (!emu) return;
+    if (startedX && !force) return;
+    startedX = true;
+    try {
+      emu.keyboard_send_text(
+        "\nrm -f /usr/lib/libLLVM* /usr/lib/dri/*swrast*\necho '#!/bin/sh' > /root/.xinitrc\necho 'exec fluxbox' >> /root/.xinitrc\nchmod +x /root/.xinitrc\nstartx\n",
+        30
+      );
     } catch (err) {}
   }
-  function tryStartX() {
-    if (startedX || !emu) return;
-    startedX = true;
-    try { emu.keyboard_send_text("startx\n"); } catch (err) {}
+  function markDesk() {
+    phase = "desk";
+    splash.style.display = "none";
+    boot.style.display = "none";
+    hideHostCursor();
+    nativeLock();
   }
   function showSheet(html) {
     panel.innerHTML = html + '<p><button class="btn" id="xSheet" type="button">إغلاق</button></p>';
@@ -134,14 +174,22 @@ if (typeof window.setImmediate !== "function") {
   document.getElementById("bLic").onclick = function () {
     showSheet(
       "<h2>Puck Linux · تراخيص</h2>" +
-      "<p>هذا حاسوب لينكس داخل التطبيق. الضيف Tiny Core 16، النواة <b>6.12.11-tinycore</b> (GPL-2.0).</p>" +
+      "<p>هذا حاسوب لينكس مدمج داخل التطبيق. الضيف <b>Arch Linux i686</b>، النواة <b>6.13.7-arch1-1.0-ARCH32</b> مع Xorg وFluxbox وFirefox وpacman. النواة GPL-2.0 من Arch Linux 32.</p>" +
       "<p>الآيفون لا يفتح Hypervisor.framework ولا Virtualization.framework لتطبيقات الطرف الثالث — حتى على iOS 27. VirtualMac يعمل على آيباد M-series فقط. المسار الفعلي هنا: محاكاة x86 عبر v86 وWebAssembly JIT.</p>" +
       "<ul>" +
-      "<li><a href='https://www.kernel.org/'>Linux kernel 6.12.11</a> — GPL-2.0 · <a href='https://www.tinycorelinux.net/16.x/'>tinycorelinux.net/16.x</a></li>" +
-      "<li>Tiny Core Linux 16 — سطح FLWM / Xvesa</li>" +
+      "<li><a href='https://www.kernel.org/'>Linux 6.13.7-arch1-1.0-ARCH32</a> — GPL-2.0 · <a href='https://archlinux32.org/'>archlinux32.org</a></li>" +
+      "<li>Arch Linux i686 — Xorg / Firefox / pacman · <a href='https://copy.sh/v86/?profile=archlinux'>copy.sh/v86</a></li>" +
       "<li><a href='https://github.com/copy/v86'>v86</a> — BSD-2-Clause</li>" +
       "<li>SeaBIOS / VGA BIOS — LGPL</li>" +
       "</ul>"
+    );
+  };
+  document.getElementById("bPtr").onclick = function () {
+    nativeMsg("a11y");
+    showSheet(
+      "<h2>مؤشر لينكس</h2>" +
+      "<p>مؤشر لينكس الأسود هو مؤشر X11 داخل النظام الضيف. Puck يخفي مؤشر UIKit ويلتقط الفأرة عبر تفضيل قفل المؤشر ومسار Game Controller.</p>" +
+      "<p>المثلث الأبيض إن بقي هو مؤشر اللمس المساعد في iOS — طبقة تسهيلات فوق كل التطبيقات. أوقفه مؤقتاً من الإعدادات ← تسهيلات الاستخدام ← لمس أثناء عمل لينكس ليبقى مؤشر لينكس وحده. أعد تشغيله عندما تريد مؤشراً على الشاشة الرئيسية.</p>"
     );
   };
   document.getElementById("bRe").onclick = function () {
@@ -151,7 +199,11 @@ if (typeof window.setImmediate !== "function") {
     boot.style.display = "flex";
     peek.className = "";
     if (emu) emu.restart();
-    setTimeout(function () { grabMouse(); }, 800);
+    setTimeout(function () {
+      startedX = true;
+      try { emu.keyboard_send_text("\nrm -f /usr/lib/libLLVM* /usr/lib/dri/*swrast*\necho '#!/bin/sh' > /root/.xinitrc\necho 'exec fluxbox' >> /root/.xinitrc\nchmod +x /root/.xinitrc\nstartx\n", 30); } catch (e) {}
+      grabMouse();
+    }, 900);
   };
   document.getElementById("peekhit").onclick = function () {
     peek.className = "on";
@@ -169,16 +221,16 @@ if (typeof window.setImmediate !== "function") {
 
   emu = new V86({
     wasm_path: "v86.wasm",
-    memory_size: 384 * 1024 * 1024,
+    memory_size: 512 * 1024 * 1024,
     vga_memory_size: 8 * 1024 * 1024,
-    screen: { container: screenEl, use_graphical_text: true },
-    bios: { url: "seabios.bin" },
-    vga_bios: { url: "vgabios.bin" },
-    cdrom: { url: "TinyCore.iso", async: false },
+    screen: { container: screenEl, use_graphical_text: false },
+    initial_state: { url: "arch_state.bin.zst" },
+    filesystem: { baseurl: "arch/" },
+    net_device: { type: "virtio", relay_url: "wss://relay.widgetry.org/" },
+    preserve_mac_from_state_image: true,
     autostart: true,
     disable_speaker: true,
-    fastboot: true,
-    boot_order: 0x213
+    fastboot: true
   });
 
   emu.add_listener("download-progress", function (p) {
@@ -192,36 +244,22 @@ if (typeof window.setImmediate !== "function") {
     boot.style.display = "flex";
     hideHostCursor();
     nativeLock();
-    [1800, 5000, 9000, 14000, 25000, 40000, 55000, 70000].forEach(function (t) {
-      setTimeout(function () { try { emu.keyboard_send_text("\n"); } catch (e) {} }, t);
-    });
-    setTimeout(tryStartX, 90000);
-    setTimeout(function () { grabMouse(); }, 2200);
-  });
-  emu.add_listener("serial0-output-byte", function (b) {
-    serialBuf += String.fromCharCode(b);
-    if (serialBuf.length > 8000) serialBuf = serialBuf.slice(-2000);
-    if (/tc@box|login:|tinycore login/i.test(serialBuf)) tryStartX();
+    setTimeout(function () { tryStartX(); }, 5000);
+    setTimeout(function () { if (!canvasLooksLikeDesktop()) tryStartX(true); }, 45000);
+    setTimeout(function () { grabMouse(); }, 400);
   });
   emu.add_listener("screen-set-size", function (arg) {
     var w = 0, h = 0;
     if (Array.isArray(arg)) { w = +arg[0]; h = +arg[1]; }
-    if (w >= 320 && h >= 200) {
-      phase = "desk";
-      splash.style.display = "none";
-      boot.style.display = "none";
-      grabMouse();
-    }
+    if (w >= 320 && h >= 200 && canvasLooksLikeDesktop()) markDesk();
   });
-  emu.add_listener("mouse-enable", function () { grabMouse(); });
+  emu.add_listener("mouse-enable", function () {
+    grabMouse();
+    if (startedX) setTimeout(function () { if (canvasLooksLikeDesktop()) markDesk(); }, 1200);
+  });
   setInterval(function () {
-    var canvas = screenEl.querySelector("canvas");
-    if (canvas && canvas.style.display !== "none" && (canvas.width >= 320 || canvas.clientWidth >= 320)) {
-      phase = "desk";
-      splash.style.display = "none";
-      boot.style.display = "none";
-    }
-  }, 2000);
+    if (canvasLooksLikeDesktop()) markDesk();
+  }, 1000);
 })();
 </script>
 </body>

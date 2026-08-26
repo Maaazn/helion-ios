@@ -1,8 +1,9 @@
-TinyCore-current.iso (Tiny Core Linux 16)
-Source: http://www.tinycorelinux.net/16.x/x86/release/TinyCore-current.iso
-Upstream: https://tinycorelinux.net/16.x/
-Size: 25165824 bytes
-Kernel: 6.12.11-tinycore (GPL-2.0)
-
-This is a real Linux distribution (kernel + Xvesa / FLWM desktop).
-Get kernel source from Tiny Core 16.x / kernel.org.
+Arch Linux i686 for v86 (copy.sh profile archlinux)
+State: https://i.copy.sh/arch_state-v3.bin.zst
+Size: 15493096 bytes (zstd)
+9p root: https://i.copy.sh/arch/  (the app proxies this as puckasset://app/arch/)
+Upstream distro: https://archlinux32.org/
+Kernel: 6.13.7-arch1-1.0-ARCH32 (GPL-2.0)
+Userspace: Arch Linux — Xorg, Fluxbox, Firefox, pacman
+Built for v86: https://copy.sh/v86/?profile=archlinux · https://github.com/copy/v86
+Tiny Core is not used.

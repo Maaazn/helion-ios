@@ -20,19 +20,21 @@ jobs:
       - name: Build IPA
         run: |
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=1.9.0 scripts/build-ipa.sh
+          HELION_VERSION=1.10.3 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
           z=zipfile.ZipFile('dist/Helion.ipa')
           names=z.namelist()
           assert any(n.endswith('Helion.app/Helion') for n in names)
-          assert any('Helion.app/computer/TinyCore.iso' in n for n in names)
+          assert any('Helion.app/computer/arch_state.bin.zst' in n for n in names)
+          assert not any('TinyCore.iso' in n for n in names)
           assert any('Helion.app/computer/v86.wasm' in n for n in names)
           assert any('Helion.app/computer/index.html' in n for n in names)
+          assert any('/computer/arch/' in n and n.endswith('.bin') for n in names)
           sz=os.path.getsize('dist/Helion.ipa')
-          print('ipa', sz)
-          assert sz > 10*1024*1024
+          print('ipa', sz, 'arch files', sum(1 for n in names if '/computer/arch/' in n and n.endswith('.bin')))
+          assert sz > 40*1024*1024
           PY
 
       - name: Import p12 and codesign
@@ -66,17 +68,17 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.9.0
-          name: Puck Linux 1.9.0
+          tag_name: v1.10.3
+          name: Puck Linux 1.10.3
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            # Puck Linux 1.9.0 — PUCK LINUX IN
+            # Puck Linux 1.10.3 — PUCK LINUX IN
 
-            Full-screen Linux computer. Guest is **Tiny Core Linux 16**, kernel **6.12.11-tinycore** (GPL-2.0), running in [v86](https://github.com/copy/v86).
+            Full-screen Linux computer. Guest is **Arch Linux i686**, kernel **6.13.7-arch1-1.0-ARCH32** (GPL-2.0) with Xorg, Fluxbox, Firefox and pacman, running in [v86](https://github.com/copy/v86). Tiny Core is gone. The running system image and the 9p pages needed to reach the desktop are bundled in the app.
 
-            The host mouse is hidden inside the app (`prefersPointerLocked` + CSS `cursor: none`). You use the Linux X11 cursor. AssistiveTouch remains the Home Screen pointer **outside** the app.
+            Host UIKit pointer is hidden (`GCEventViewController` + `prefersPointerLocked` + CSS `cursor: none`). You use the Linux X11 cursor. AssistiveTouch remains the Home Screen pointer **outside** the app — it is a system overlay. Turn it off while using Linux if you want a single cursor.
 
             iPhone does not give third-party apps Hypervisor.framework (including iOS 27). VirtualMac is iPad M-series. This is in-app x86 emulation — announced, licensed, not a jailbreak.
 
@@ -84,11 +86,11 @@ jobs:
 
             | Piece | License | Source |
             | --- | --- | --- |
-            | Linux kernel 6.12.11-tinycore | GPL-2.0 | [tinycorelinux.net/16.x](https://www.tinycorelinux.net/16.x/) · [kernel.org](https://www.kernel.org/) |
-            | Tiny Core Linux 16 | mixed OSI | [tinycorelinux.net](https://tinycorelinux.net/) |
+            | Linux 6.13.7-arch1-1.0-ARCH32 | GPL-2.0 | [archlinux32.org](https://archlinux32.org/) · [kernel.org](https://www.kernel.org/) |
+            | Arch Linux i686 | mixed OSI | [archlinux32.org](https://archlinux32.org/) · [copy.sh/v86](https://copy.sh/v86/?profile=archlinux) |
             | v86 | BSD-2-Clause | [copy/v86](https://github.com/copy/v86) |
             | SeaBIOS / VGA BIOS | LGPL | with v86 |
             | Puck Linux shell | original | this repo |
 
             Sideload `Helion.ipa` (display name **Puck Linux**, bundle `com.maaazn.helion`).
-            First boot takes about a minute, then the FLWM desktop.
+            First launch restores the running desktop from the bundled state.

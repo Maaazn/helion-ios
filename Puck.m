@@ -1,5 +1,5 @@
-// Puck Linux 1.9.0 — full-screen Tiny Core 16 (kernel 6.12.11) in v86.
-// Host pointer is hidden inside the app (prefersPointerLocked + hiddenPointerStyle).
+// Puck Linux 1.10.3 — full-screen Arch Linux i686 in v86.
+// Host pointer: GCEventViewController + prefersPointerLocked + hiddenPointerStyle.
 // AssistiveTouch remains the Home Screen pointer, outside this app.
 // No hypervisor: iPhone does not give HV/Virtualization to third-party apps.
 
@@ -1053,25 +1053,46 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 
 @interface PuckAssets : NSObject <WKURLSchemeHandler>
 @end
-@implementation PuckAssets
+@implementation PuckAssets {
+    NSMutableSet<id<WKURLSchemeTask>> *_live;
+}
+- (instancetype)init {
+    self = [super init];
+    if (self) _live = [NSMutableSet new];
+    return self;
+}
+- (void)fail:(id<WKURLSchemeTask>)task code:(NSInteger)code {
+    if (![_live containsObject:task]) return;
+    [_live removeObject:task];
+    [task didFailWithError:[NSError errorWithDomain:@"puck" code:code userInfo:nil]];
+}
 - (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)task {
+    [_live addObject:task];
     NSURL *url = task.request.URL;
     NSString *path = url.path ?: @"/index.html";
     if (path.length == 0 || [path isEqualToString:@"/"]) path = @"/index.html";
     if ([path hasPrefix:@"/"]) path = [path substringFromIndex:1];
+    if ([path hasPrefix:@"arch/"]) {
+        NSString *root = [[NSBundle mainBundle].resourcePath stringByAppendingPathComponent:@"computer"];
+        NSString *local = [[root stringByAppendingPathComponent:path] stringByStandardizingPath];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:local]) {
+            [self proxyArch:task path:path];
+            return;
+        }
+    }
     NSString *root = [[NSBundle mainBundle].resourcePath stringByAppendingPathComponent:@"computer"];
     NSString *file = [[root stringByAppendingPathComponent:path] stringByStandardizingPath];
     if (![file hasPrefix:[root stringByStandardizingPath]]) {
-        [task didFailWithError:[NSError errorWithDomain:@"puck" code:403 userInfo:nil]];
+        [self fail:task code:403];
         return;
     }
     if (![[NSFileManager defaultManager] fileExistsAtPath:file]) {
-        [task didFailWithError:[NSError errorWithDomain:@"puck" code:404 userInfo:nil]];
+        [self fail:task code:404];
         return;
     }
     NSData *data = [NSData dataWithContentsOfFile:file];
     if (!data) {
-        [task didFailWithError:[NSError errorWithDomain:@"puck" code:500 userInfo:nil]];
+        [self fail:task code:500];
         return;
     }
     NSString *mime = @"application/octet-stream";
@@ -1080,25 +1101,70 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     else if ([path hasSuffix:@".wasm"]) mime = @"application/wasm";
     else if ([path hasSuffix:@".css"]) mime = @"text/css";
     else if ([path hasSuffix:@".txt"]) mime = @"text/plain";
+    else if ([path hasSuffix:@".zst"] || [path hasSuffix:@".bin"]) mime = @"application/octet-stream";
     NSDictionary *headers = @{
         @"Content-Type": mime,
         @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length],
         @"Access-Control-Allow-Origin": @"*",
+        @"Accept-Ranges": @"bytes",
         @"Cache-Control": @"public, max-age=3600"
     };
     NSHTTPURLResponse *resp = [[NSHTTPURLResponse alloc] initWithURL:url statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:headers];
+    if (![_live containsObject:task]) return;
     [task didReceiveResponse:resp];
     [task didReceiveData:data];
+    [_live removeObject:task];
     [task didFinish];
 }
-- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task {}
+- (void)proxyArch:(id<WKURLSchemeTask>)task path:(NSString *)path {
+    NSString *remote = [@"https://i.copy.sh/" stringByAppendingString:path];
+    NSURL *ru = [NSURL URLWithString:remote];
+    if (!ru) {
+        [self fail:task code:400];
+        return;
+    }
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:ru];
+    req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    NSString *range = task.request.allHTTPHeaderFields[@"Range"] ?: task.request.allHTTPHeaderFields[@"range"];
+    if (range.length) [req setValue:range forHTTPHeaderField:@"Range"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![_live containsObject:task]) return;
+            if (err || !data) {
+                [_live removeObject:task];
+                [task didFailWithError:err ?: [NSError errorWithDomain:@"puck" code:502 userInfo:nil]];
+                return;
+            }
+            NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
+            NSInteger code = http.statusCode > 0 ? http.statusCode : 200;
+            NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+            headers[@"Content-Type"] = http.MIMEType ?: @"application/octet-stream";
+            headers[@"Content-Length"] = [NSString stringWithFormat:@"%lu", (unsigned long)data.length];
+            headers[@"Access-Control-Allow-Origin"] = @"*";
+            headers[@"Accept-Ranges"] = @"bytes";
+            id cr = http.allHeaderFields[@"Content-Range"] ?: http.allHeaderFields[@"content-range"];
+            if (cr) headers[@"Content-Range"] = cr;
+            NSHTTPURLResponse *out = [[NSHTTPURLResponse alloc] initWithURL:task.request.URL statusCode:code HTTPVersion:@"HTTP/1.1" headerFields:headers];
+            [task didReceiveResponse:out];
+            [task didReceiveData:data];
+            [_live removeObject:task];
+            [task didFinish];
+        });
+    }] resume];
+}
+- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task {
+    [_live removeObject:task];
+}
 @end
 
-@interface PuckComputer : UIViewController <WKScriptMessageHandler, UIPointerInteractionDelegate>
+@interface PuckComputer : GCEventViewController <WKScriptMessageHandler, UIPointerInteractionDelegate>
 @end
 @implementation PuckComputer {
     WKWebView *_web;
     PuckAssets *_assets;
+}
+- (BOOL)canBecomeFirstResponder {
+    return YES;
 }
 - (BOOL)prefersPointerLocked {
     return YES;
@@ -1120,6 +1186,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.controllerUserInteractionEnabled = YES;
     self.view.backgroundColor = Ink();
     _assets = [PuckAssets new];
     WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
@@ -1149,8 +1216,15 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     [self hideHostPointerOnView:_web];
     [_web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"puckasset://app/index.html"]]];
 }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (@available(iOS 14.0, *)) {
+        [self setNeedsUpdateOfPrefersPointerLocked];
+    }
+}
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    [self becomeFirstResponder];
     if (@available(iOS 14.0, *)) {
         [self setNeedsUpdateOfPrefersPointerLocked];
     }
@@ -1166,8 +1240,17 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)userContentController:(WKUserContentController *)c didReceiveScriptMessage:(WKScriptMessage *)msg {
     if (![msg.body isKindOfClass:[NSString class]]) return;
     if ([msg.body isEqualToString:@"lock"] || [msg.body isEqualToString:@"pointer"]) {
+        [self becomeFirstResponder];
         if (@available(iOS 14.0, *)) {
             [self setNeedsUpdateOfPrefersPointerLocked];
+        }
+        return;
+    }
+    if ([msg.body isEqualToString:@"a11y"]) {
+        NSURL *u = [NSURL URLWithString:@"App-prefs:root=ACCESSIBILITY&path=TOUCH"];
+        if (!u) u = [NSURL URLWithString:@"prefs:root=ACCESSIBILITY&path=TOUCH"];
+        if (u) {
+            [UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];
         }
     }
 }
