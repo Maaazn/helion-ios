@@ -1,0 +1,20 @@
+[package]
+name = "puck_pair"
+version = "0.1.0"
+edition = "2021"
+description = "Pairable-host FFI over jkcoxson/idevice (MIT) for iOS 27 Developer Mode pairing"
+
+[lib]
+name = "puck_pair"
+crate-type = ["staticlib"]
+
+[dependencies]
+idevice = { git = "https://github.com/jkcoxson/idevice.git", rev = "c65dfbf17b888c5795f17ea3e3dad60e6737252c", default-features = false, features = [
+  "remote_pairing",
+  "aws-lc",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "fs"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

@@ -1,14 +1,16 @@
-Puck Linux is original. Not an exploit. Not a hypervisor.
+# Puck
 
-The computer inside the app is real Linux: Arch Linux i686, kernel
-6.13.7-arch1-1.0-ARCH32 (GPL-2.0) with Xorg, Firefox and pacman. It runs
-in v86 (BSD-2-Clause). SeaBIOS is LGPL.
+Puck is original. Not an exploit. Not a hypervisor. Not Linux.
 
-iPhone silicon can run a hypervisor in principle. iOS 27 does not give that
-to sideloaded apps. hv_vm_create / Virtualization.framework stay unavailable
-on iPhone. VirtualMac is iPad. We ship in-app emulation.
+On iOS 27, Developer Mode can pair with an app that advertises as a
+pairable host (`_remotepairing-pairable-host._tcp`). That is the same
+public path SideInstaller and StikPair use.
 
-Inside Puck Linux the host UIKit pointer is hidden (GCEventViewController +
-prefersPointerLocked + CSS cursor:none). The visible guest pointer is X11.
-AssistiveTouch is a system overlay; turn it off while using Linux if you
-want a single cursor.
+The handshake uses [idevice](https://github.com/jkcoxson/idevice) (MIT)
+when the native library is linked. mDNS is published with NSNetService
+so the app does not need Apple’s multicast entitlement.
+
+The pairing record is this device’s computer identity. Private keys stay
+on the phone.
+
+The Home Screen pointer is AssistiveTouch. Pairing does not hide it.

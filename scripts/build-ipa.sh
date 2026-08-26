@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MIN=16.0
-VER="${HELION_VERSION:-1.10.3}"
+VER="${HELION_VERSION:-2.0.0}"
 OUT="${HELION_BUILD_ROOT:-$ROOT/build}/ipa"
 APP="$OUT/Payload/Helion.app"
 DIST="${HELION_DIST:-$ROOT/dist}"
@@ -17,8 +17,8 @@ cat > "$APP/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>Helion</string>
   <key>CFBundleIdentifier</key><string>com.maaazn.helion</string>
-  <key>CFBundleName</key><string>Puck Linux</string>
-  <key>CFBundleDisplayName</key><string>Puck Linux</string>
+  <key>CFBundleName</key><string>Puck</string>
+  <key>CFBundleDisplayName</key><string>Puck</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VER</string>
   <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER:-1}</string>
@@ -69,6 +69,18 @@ cat > "$APP/Info.plist" <<PLIST
     <string>app-prefs</string>
   </array>
   <key>NSPhotoLibraryUsageDescription</key><string>Pick a cursor image or wallpaper.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Puck advertises itself as a pairable computer so iOS 27 Developer Mode can pair with it.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_remotepairing-pairable-host._tcp</string>
+    <string>_remotepairing-manual-pairing._tcp</string>
+    <string>_puckprobe._tcp</string>
+  </array>
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>audio</string>
+  </array>
+  <key>NSMicrophoneUsageDescription</key><string>Not used. Background audio keeps pairing alive while you enter the PIN in Settings.</string>
   <key>UTImportedTypeDeclarations</key>
   <array>
     <dict>
@@ -143,17 +155,44 @@ do
   sips -z "$size" "$size" "$APP/AppIcon1024x1024.png" --out "$APP/$name" >/dev/null
 done
 
+python3 - "$APP/silence.wav" <<'PY'
+import struct, sys
+# 1s mono 8kHz silence WAV so pairing can stay alive in Settings
+n, rate = 8000, 8000
+data = b"\x00\x00" * n
+hdr = b"RIFF" + struct.pack("<I", 36+len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16,1,1,rate,rate*2,2,16) + b"data" + struct.pack("<I", len(data))
+open(sys.argv[1],"wb").write(hdr+data)
+PY
+
+PAIR_CFLAGS=""
+PAIR_LIBS=""
+if command -v rustup >/dev/null 2>&1 || [ -x "$HOME/.cargo/bin/cargo" ]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+if command -v cargo >/dev/null 2>&1; then
+  echo "building puck_pair rust staticlib"
+  export IPHONEOS_DEPLOYMENT_TARGET="$MIN"
+  export SDKROOT="$SDK"
+  if ( cd "$ROOT/pair" && cargo build --release --target aarch64-apple-ios ); then
+    PAIR_CFLAGS="-DPUCK_PAIR_LIB -I$ROOT/pair/include"
+    PAIR_LIBS="-L$ROOT/pair/target/aarch64-apple-ios/release -lpuck_pair -lc++"
+    echo "puck_pair linked"
+  else
+    echo "puck_pair rust build failed — ObjC Bonjour host only"
+  fi
+else
+  echo "cargo missing — ObjC Bonjour host only"
+fi
+
 xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min="$MIN" -isysroot "$SDK" \
   -fobjc-arc \
+  $PAIR_CFLAGS \
   -framework Foundation -framework UIKit -framework GameController \
   -framework CoreGraphics -framework QuartzCore -framework UniformTypeIdentifiers \
-  -framework WebKit \
-  "$ROOT/Puck.m" -o "$APP/Helion"
-
-mkdir -p "$APP/computer"
-if [ -d "$ROOT/computer" ]; then
-  cp -R "$ROOT/computer/." "$APP/computer/"
-fi
+  -framework WebKit -framework AVFoundation -framework CFNetwork \
+  "$ROOT/Puck.m" "$ROOT/PuckPair.m" \
+  $PAIR_LIBS \
+  -o "$APP/Helion"
 
 ls -lh "$APP/Helion"
 ( cd "$OUT" && zip -r -y "$DIST/Helion.ipa" Payload )

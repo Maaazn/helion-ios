@@ -1,6 +1,8 @@
 name: Build Helion IPA
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,28 +15,35 @@ concurrency:
 jobs:
   prove:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
+      - name: Rust for pairable host
+        run: |
+          brew install cmake ninja || true
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          . "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios
+
       - name: Build IPA
         run: |
+          . "$HOME/.cargo/env"
           chmod +x scripts/build-ipa.sh
-          HELION_VERSION=1.10.3 scripts/build-ipa.sh
+          HELION_VERSION=2.0.0 scripts/build-ipa.sh
           test -f dist/Helion.ipa
           python3 - <<'PY'
           import zipfile, os
           z=zipfile.ZipFile('dist/Helion.ipa')
           names=z.namelist()
           assert any(n.endswith('Helion.app/Helion') for n in names)
-          assert any('Helion.app/computer/arch_state.bin.zst' in n for n in names)
           assert not any('TinyCore.iso' in n for n in names)
-          assert any('Helion.app/computer/v86.wasm' in n for n in names)
-          assert any('Helion.app/computer/index.html' in n for n in names)
-          assert any('/computer/arch/' in n and n.endswith('.bin') for n in names)
+          assert not any('arch_state.bin.zst' in n for n in names)
           sz=os.path.getsize('dist/Helion.ipa')
-          print('ipa', sz, 'arch files', sum(1 for n in names if '/computer/arch/' in n and n.endswith('.bin')))
-          assert sz > 40*1024*1024
+          print('ipa', sz, 'files', len(names))
+          assert sz > 80*1024
           PY
 
       - name: Import p12 and codesign
@@ -68,29 +77,30 @@ jobs:
       - name: Publish IPA
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.10.3
-          name: Puck Linux 1.10.3
+          tag_name: v2.0.0
+          name: Puck 2.0.0
           prerelease: false
           make_latest: true
           files: dist/Helion.ipa
           body: |
-            # Puck Linux 1.10.3 — PUCK LINUX IN
+            # Puck 2.0.0 — pair + pointer
 
-            Full-screen Linux computer. Guest is **Arch Linux i686**, kernel **6.13.7-arch1-1.0-ARCH32** (GPL-2.0) with Xorg, Fluxbox, Firefox and pacman, running in [v86](https://github.com/copy/v86). Tiny Core is gone. The running system image and the 9p pages needed to reach the desktop are bundled in the app.
+            Back on the system-pointer path. Linux guest is gone.
 
-            Host UIKit pointer is hidden (`GCEventViewController` + `prefersPointerLocked` + CSS `cursor: none`). You use the Linux X11 cursor. AssistiveTouch remains the Home Screen pointer **outside** the app — it is a system overlay. Turn it off while using Linux if you want a single cursor.
+            ## Pair (iOS 27 Developer Mode)
 
-            iPhone does not give third-party apps Hypervisor.framework (including iOS 27). VirtualMac is iPad M-series. This is in-app x86 emulation — announced, licensed, not a jailbreak.
+            Puck advertises itself as a pairable computer (`_remotepairing-pairable-host._tcp`) — the same wireless pairing path SideInstaller and StikPair use.
 
-            ## This is real Linux (GPL)
+            1. Open Puck → Pair
+            2. Allow Local Network
+            3. Settings → Privacy & Security → Developer Mode → Pair with Puck
+            4. Type the 6-digit PIN
+            5. Export or keep the pairing record on the phone
 
-            | Piece | License | Source |
-            | --- | --- | --- |
-            | Linux 6.13.7-arch1-1.0-ARCH32 | GPL-2.0 | [archlinux32.org](https://archlinux32.org/) · [kernel.org](https://www.kernel.org/) |
-            | Arch Linux i686 | mixed OSI | [archlinux32.org](https://archlinux32.org/) · [copy.sh/v86](https://copy.sh/v86/?profile=archlinux) |
-            | v86 | BSD-2-Clause | [copy/v86](https://github.com/copy/v86) |
-            | SeaBIOS / VGA BIOS | LGPL | with v86 |
-            | Puck Linux shell | original | this repo |
+            Pairing is Apple’s developer pairing. It is not a jailbreak and it does not hide AssistiveTouch.
 
-            Sideload `Helion.ipa` (display name **Puck Linux**, bundle `com.maaazn.helion`).
-            First launch restores the running desktop from the bundled state.
+            ## Pointer
+
+            In-app cursor (Mac / Win / Puck / file). Home Screen pointer is AssistiveTouch — turn it on once, turn Always Show Menu off.
+
+            Sideload `Helion.ipa` (display name **Puck**, bundle `com.maaazn.helion`).

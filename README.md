@@ -1,17 +1,23 @@
-# Puck Linux
+# Puck
 
-Full-screen Linux computer inside a sideloaded iPhone app.
+Sideloaded iPhone app: **Developer Mode pairing** + **system pointer**.
 
-Guest: **Arch Linux i686**, kernel **6.13.7-arch1-1.0-ARCH32** (GPL-2.0)
-with Xorg, Fluxbox, Firefox, pacman. Tiny Core is not used.
-The running system image and the 9p pages needed to reach the desktop
-are bundled in the app.
-Emulator: [v86](https://github.com/copy/v86) (BSD-2-Clause) — x86 in WebAssembly.
-That is the allowed path. iPhone apps do not get Hypervisor.framework.
+## Pair
 
-On launch the host UIKit pointer is hidden (`GCEventViewController` +
-`prefersPointerLocked`). You use the Linux X11 cursor.
+Puck advertises itself as a computer on the local network
+(`_remotepairing-pairable-host._tcp`). On iOS 27:
 
-Tap the top edge for licenses / pointer / reboot.
+1. Open Puck → Pair
+2. Allow Local Network
+3. Settings → Privacy & Security → Developer Mode → Pair with Puck
+4. Enter the PIN
+5. Export the pairing file if you need it for StikDebug / SideStore
+
+This is Apple’s pairing, not a jailbreak.
+
+## Pointer
+
+In-app cursor. Home Screen pointer is AssistiveTouch (turn Always Show
+Menu off).
 
 See NOTICE.md.

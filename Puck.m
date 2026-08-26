@@ -1,7 +1,6 @@
-// Puck Linux 1.10.3 — full-screen Arch Linux i686 in v86.
-// Host pointer: GCEventViewController + prefersPointerLocked + hiddenPointerStyle.
-// AssistiveTouch remains the Home Screen pointer, outside this app.
-// No hypervisor: iPhone does not give HV/Virtualization to third-party apps.
+// Puck 2.0.0 — system pointer + iOS 27 Developer Mode pairing.
+// Pairing: the phone treats Puck as a trusted computer (RPPairing pairable host).
+// Home Screen pointer is AssistiveTouch. Pairing does not hide that overlay.
 
 
 #import <UIKit/UIKit.h>
@@ -12,6 +11,7 @@
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <notify.h>
+#import "PuckPair.h"
 
 typedef NS_ENUM(NSInteger, PuckShape) { PuckShapeMac = 0, PuckShapeWin, PuckShapePuck, PuckShapeCross, PuckShapeFile };
 typedef NS_ENUM(NSInteger, PuckDesk)  { PuckDeskVoid = 0, PuckDeskGrid, PuckDeskPaper, PuckDeskPhoto };
@@ -384,7 +384,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     NSArray<UIButton *> *_deskBtns;
     UILabel *_sysNote;
     UIButton *_enableBtn;
-    UIButton *_linuxBtn;
+    UIButton *_pairBtn;
     NSInteger _pickKind;
     BOOL _sawHover;
     BOOL _setupShown;
@@ -416,10 +416,9 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
-    _linuxBtn = [self mintBtn:PuckS(@"Linux", @"لينكس") action:@selector(closeToComputer) ghost:YES];
-    _linuxBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    _linuxBtn.hidden = YES;
-    [self.view addSubview:_linuxBtn];
+    _pairBtn = [self mintBtn:PuckS(@"Pair", @"اقتران") action:@selector(openPair) ghost:YES];
+    _pairBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_pairBtn];
 
     _sub = [UILabel new];
     _sub.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
@@ -568,11 +567,11 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
         [_sub.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
         [_sub.trailingAnchor constraintEqualToAnchor:_device.leadingAnchor constant:-8],
         [_device.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [_linuxBtn.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [_linuxBtn.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [_linuxBtn.heightAnchor constraintEqualToConstant:32],
-        [_linuxBtn.widthAnchor constraintGreaterThanOrEqualToConstant:68],
-        [_device.trailingAnchor constraintEqualToAnchor:_linuxBtn.leadingAnchor constant:-8],
+        [_pairBtn.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+        [_pairBtn.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [_pairBtn.heightAnchor constraintEqualToConstant:32],
+        [_pairBtn.widthAnchor constraintGreaterThanOrEqualToConstant:68],
+        [_device.trailingAnchor constraintEqualToAnchor:_pairBtn.leadingAnchor constant:-8],
         [_device.widthAnchor constraintLessThanOrEqualToConstant:170],
         [_stage.topAnchor constraintEqualToAnchor:_sub.bottomAnchor constant:8],
         [_stage.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:14],
@@ -706,7 +705,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    _linuxBtn.hidden = (self.presentingViewController == nil);
+    _pairBtn.hidden = NO;
     _pos = CGPointMake(self.view.bounds.size.width/2, self.view.bounds.size.height/2);
     [self placeCursor];
     for (GCMouse *m in GCMouse.mice) [self bindMouse:m];
@@ -1035,10 +1034,10 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
     PuckOpenPrefs(PuckAssistiveTouchURLs());
     [self startWatch];
 }
-- (void)closeToComputer {
-    if (self.presentingViewController) {
-        [self dismissViewControllerAnimated:YES completion:nil];
-    }
+- (void)openPair {
+    PuckPair *p = [PuckPair new];
+    p.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self presentViewController:p animated:YES completion:nil];
 }
 - (void)maybeFinishSetup {
     if (!PuckWantSystem()) return;
@@ -1268,7 +1267,7 @@ static UIImage *PuckImageFromData(NSData *data, CGPoint *hotOut) {
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)opts {
     if (![scene isKindOfClass:[UIWindowScene class]]) return;
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-    self.window.rootViewController = [PuckComputer new];
+    self.window.rootViewController = [PuckHome new];
     self.window.backgroundColor = Ink();
     [self.window makeKeyAndVisible];
 }
